@@ -367,6 +367,7 @@ export const actions = {
     if (!t) return;
     const files = state.files.filter((f) => f.trackId === id);
     for (const f of files) if (f.blobKey) void idbDel(f.blobKey);
+    if (t.coverSeed.startsWith("img:")) void idbDel(t.coverSeed.slice(4));
     setState((s) =>
       pushAudit(
         {

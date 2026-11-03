@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Info, TriangleAlert, CircleAlert, CircleCheck } from "lucide-react";
 import { cx, hashString } from "@/lib/util";
+import { useCoverUrl } from "@/lib/covers";
 
 export function PageHeader({
   eyebrow,
@@ -248,6 +249,13 @@ export function Cover({ seed, size = 40, rounded = "rounded-md", className, labe
     c2 = `hsl(${hue2} 52% 16%)`;
   }
   const shape = hashString(seed + "s") % 3;
+  const img = useCoverUrl(seed);
+  if (img) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- local blob URL from IndexedDB
+      <img src={img} alt="" aria-hidden width={size} height={size} draggable={false} className={cx("shrink-0 bg-surface-3 object-cover", rounded, className)} style={{ width: size, height: size }} />
+    );
+  }
   return (
     <div
       aria-hidden

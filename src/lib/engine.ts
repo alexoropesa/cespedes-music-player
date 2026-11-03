@@ -62,7 +62,10 @@ function fail(s: State, j: IngestJob, code: FailureCode, message: string, now: n
     ],
   }));
   s2 = pushAudit(s2, "ingest.job.failed", `${j.code} failed · ${code} — ${message}`, "error", j.code, { tool: j.tool, version: j.toolVersion, source: j.source.url });
-  if (j.mode === "local-file" && !(retryable ?? isTransient) && j.blobKey) void idbDel(j.blobKey);
+  if (j.mode === "local-file" && !(retryable ?? isTransient)) {
+    if (j.blobKey) void idbDel(j.blobKey);
+    if (j.source.coverSeed.startsWith("img:")) void idbDel(j.source.coverSeed.slice(4));
+  }
   queueMicrotask(() => toast({ tone: "error", title: `${j.code} failed`, description: message }));
   return s2;
 }

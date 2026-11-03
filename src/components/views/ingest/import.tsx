@@ -7,7 +7,8 @@ import { actions, useStore } from "@/lib/store";
 import { useNow } from "@/lib/clock";
 import { toast } from "@/lib/toast";
 import { idbPut } from "@/lib/idb";
-import { EXT_COMPATIBLE, extOf, sniffAudio, type Sniff } from "@/lib/audio-inspect";
+import { EXT_COMPATIBLE, extOf, extractCover, sniffAudio, type Sniff } from "@/lib/audio-inspect";
+import { storeEmbeddedCover } from "@/lib/covers";
 import { codecLabel } from "@/lib/seed";
 import { cx, fmtBytes, fmtRelative, uid } from "@/lib/util";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ export function ImportView() {
   const [playlistId, setPlaylistId] = useState("");
   const [busy, setBusy] = useState(false);
   const [openJob, setOpenJob] = useState<string | null>(null);
+  const [artwork, setArtwork] = useState<string | null>(null);
 
   const recent = jobs.filter((j) => j.mode === "local-file").sort((a, b) => b.createdAt - a.createdAt).slice(0, 8);
   const tooBig = file ? file.size > settings.maxSizeMB * 1048576 : false;
@@ -42,11 +44,20 @@ export function ImportView() {
     setIdentity(emptyIdentity(f.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").replace(/^\d+\s*[-.]\s*/, "")));
     const head = await f.slice(0, 512 * 1024).arrayBuffer();
     setSniff(sniffAudio(head));
+    const cover = extractCover(await f.arrayBuffer());
+    setArtwork((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return cover ? URL.createObjectURL(new Blob([cover.data.slice()], { type: cover.mime })) : null;
+    });
   };
 
   const reset = () => {
     setFile(null);
     setSniff(null);
+    setArtwork((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return null;
+    });
     setIdentity(emptyIdentity());
     setAuth(emptyAuth("own-content"));
     setPlaylistId("");
@@ -59,6 +70,7 @@ export function ImportView() {
     try {
       const key = uid("stage");
       await idbPut(key, file);
+      const coverSeed = (await storeEmbeddedCover(await file.arrayBuffer()).catch(() => null)) ?? file.name;
       const authorizationId = commitAuthorization(auth);
       const ident = commitIdentity(identity);
       const sn = sniff && sniff !== "pending" ? sniff : null;
@@ -75,7 +87,7 @@ export function ImportView() {
           durationSec: 0,
           bitrateKbps: 0,
           formats: [{ id: "file", ext, codec: sn?.codec ?? "unknown", container: sn?.container ?? ext, abrKbps: 0, asrHz: sn?.sampleRateHz ?? 0, sizeBytes: file.size }],
-          coverSeed: file.name,
+          coverSeed,
         },
         formatId: "file",
         identity: ident,
@@ -128,9 +140,14 @@ export function ImportView() {
             ) : (
               <div className="rounded-xl border border-line bg-surface-1/50 p-4">
                 <div className="flex items-start gap-3">
-                  <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
-                    <FileMusic size={20} />
-                  </div>
+                  {artwork ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- local preview of the file's embedded artwork
+                    <img src={artwork} alt="Embedded artwork" width={56} height={56} className="size-14 shrink-0 rounded-lg object-cover" title="Embedded artwork — kept with the track" />
+                  ) : (
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]" title="No embedded artwork — a generated cover will be used">
+                      <FileMusic size={20} />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-semibold">{file.name}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-fg-2">

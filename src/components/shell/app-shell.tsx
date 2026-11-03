@@ -10,6 +10,7 @@ import { CommandPalette } from "./command-palette";
 import { Toaster } from "./toaster";
 import { initStore, session, useHydrated } from "@/lib/store";
 import { engineTick } from "@/lib/engine";
+import { backfillCovers } from "@/lib/covers";
 import { toggle } from "@/lib/player";
 import { ViewSkeleton } from "@/components/ui/layout";
 import { IconButton } from "@/components/ui/button";
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Boot: load persisted workspace (or seed), learn the request IP for audit entries.
   useEffect(() => {
     initStore();
+    void backfillCovers();
     fetch("/api/whoami", { cache: "no-store" })
       .then((r) => r.json())
       .then((d: { ip?: string }) => {
