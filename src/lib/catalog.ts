@@ -52,6 +52,15 @@ export const ENGINE_INFO: Record<
     license: "Apache-2.0",
     notes: "Documented default: re-encodes to AAC/M4A 320 kbps. Not source quality.",
   },
+  match: {
+    name: "Match",
+    version: "2026.10.22",
+    runtime: "yt-dlp + Node.js (in the app server)",
+    input: "Spotify track link",
+    upstream: "Spotify metadata → operator-picked YouTube upload",
+    license: "Unlicense (yt-dlp)",
+    notes: "No Spotify credentials needed. Candidates are scored; the operator picks one. The stream is kept as received.",
+  },
 };
 
 export const PROVIDER_LABEL: Record<Provider, string> = {
@@ -489,9 +498,9 @@ export function searchEngine(query: string, engine: EngineId, tolerance: number)
   let note: string | undefined;
   for (const s of songs) {
     const a = artistByKey(s.artist);
-    const hasRef = engine === "spotdl" ? a.onSpotify : a.onSpotify || a.onApple || !!a.onDeezer;
+    const hasRef = engine === "freyrjs" ? a.onSpotify || a.onApple || !!a.onDeezer : a.onSpotify;
     if (!hasRef) {
-      note = `${a.name} has no ${engine === "spotdl" ? "Spotify" : "Spotify / Apple Music / Deezer"} reference — ${ENGINE_INFO[engine].name} cannot resolve independent releases outside streaming catalogs.`;
+      note = `${a.name} has no ${engine === "freyrjs" ? "Spotify / Apple Music / Deezer" : "Spotify"} reference — ${ENGINE_INFO[engine].name} cannot resolve independent releases outside streaming catalogs.`;
       continue;
     }
     const vs = VARIANTS.filter((v) => v.songKey === s.key);

@@ -263,7 +263,7 @@ export function OverviewView() {
         <Card title="Quick actions" description="Every import records provenance and an authorization before it is stored">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {[
-              { href: "/ingest/url", icon: <Link2 size={18} />, t: "Ingest from URL", d: "yt-dlp, spotDL or FreyrJS on this PC" },
+              { href: "/ingest/url", icon: <Link2 size={18} />, t: "Ingest from URL", d: "yt-dlp, spotDL, FreyrJS or Match on this PC" },
               { href: "/ingest", icon: <FileUp size={18} />, t: "Import from disk", d: "Real decode, codec, duration and SHA-256 checks" },
               { href: "/library", icon: <Library size={18} />, t: "Library", d: "Validated tracks with provenance" },
               { href: "/playlists", icon: <ListMusic size={18} />, t: "Playlists", d: "Only ready, usable tracks" },

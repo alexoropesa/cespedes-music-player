@@ -7,8 +7,8 @@
 export type JobStatus = "pending" | "downloading" | "validating" | "ready" | "failed";
 export const JOB_STATUSES: JobStatus[] = ["pending", "downloading", "validating", "ready", "failed"];
 
-export type EngineId = "yt-dlp" | "spotdl" | "freyrjs";
-export const ENGINES: EngineId[] = ["yt-dlp", "spotdl", "freyrjs"];
+export type EngineId = "yt-dlp" | "spotdl" | "freyrjs" | "match";
+export const ENGINES: EngineId[] = ["yt-dlp", "spotdl", "freyrjs", "match"];
 export type IngestTool = EngineId | "local-import";
 
 export type ArtistTier = "established" | "independent";

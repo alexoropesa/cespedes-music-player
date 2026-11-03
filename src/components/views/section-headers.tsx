@@ -11,7 +11,7 @@ export function IngestHeader() {
     <PageHeader
       eyebrow="Ingest"
       title="Bring in authorized tracks"
-      description="Download from a URL with yt-dlp, spotDL or FreyrJS on this PC, or import a file from disk. Every file is validated for real — full decode, real codec, duration, SHA-256 and duplicates — before it reaches the library."
+      description="Download from a URL with yt-dlp, spotDL, FreyrJS or Match on this PC, or import a file from disk. Every file is validated for real — full decode, real codec, duration, SHA-256 and duplicates — before it reaches the library."
     >
       <SubNav
         items={[

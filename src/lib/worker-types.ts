@@ -10,10 +10,43 @@ export interface InspectMeta extends SourceMetadata {
   /** Remote thumbnail / cover URL reported by the engine (shown in the preview only). */
   thumbnailUrl?: string;
   license?: string;
-  /** Catalog reference (spotDL / FreyrJS): what was requested, before matching audio elsewhere. */
-  reference?: { provider: "spotify" | "apple-music" | "deezer"; title: string; artist: string; album?: string; durationSec: number };
+  /** Catalog reference (spotDL / FreyrJS / Match): what was requested, before matching audio elsewhere. */
+  reference?: { provider: "spotify" | "apple-music" | "deezer"; title: string; artist: string; album?: string; durationSec: number; isrc?: string };
   /** True when duration and formats are only known after the download (FreyrJS without a Spotify reference). */
   metadataAfterDownload?: boolean;
+  /**
+   * Match engine: the YouTube upload chosen automatically — best match to the
+   * reference, then the highest audio bitrate among near-equal matches. Its
+   * best audio stream is `formats[0]`, listed under the video id.
+   */
+  matched?: MatchCandidate;
+}
+
+export type MatchFlag = "live" | "cover" | "remix" | "other-artist" | "altered" | "karaoke" | "instrumental" | "acapella" | "extended" | "lyric-video" | "low-quality" | "duration-mismatch";
+
+export interface MatchCandidate {
+  /** YouTube video id (11 chars). */
+  id: string;
+  url: string;
+  title: string;
+  channel: string;
+  durationSec: number;
+  /** Seconds away from the reference duration. */
+  deltaSec: number;
+  /** 0–100: duration, title and artist agreement minus version penalties. */
+  score: number;
+  /** Uploaded by the artist's own channel or its auto-generated "- Topic" channel. */
+  official: boolean;
+  flags: MatchFlag[];
+  /** Measured on a ~60 s sample of the stream (Match picks by this before the score). */
+  quality?: {
+    /** Highest band (kHz) still carrying content: ~16 for an MP3 rip, ≥ 19.5 for a master. */
+    cutoffKHz: number;
+    /** Treble level relative to the whole signal, dB: higher is better. */
+    hfDb: number;
+    /** Full bandwidth (not low-passed). */
+    full: boolean;
+  };
 }
 
 export type InspectResponse =
@@ -67,6 +100,7 @@ export interface CreateWorkerJob {
   key: string;
   engine: EngineId;
   url: string;
+  /** yt-dlp: format id. Match: the chosen candidate's YouTube video id. */
   formatId?: string;
   maxSizeMB: number;
 }

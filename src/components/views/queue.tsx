@@ -123,6 +123,7 @@ export function QueueView() {
             <option value="yt-dlp">yt-dlp</option>
             <option value="spotdl">spotDL</option>
             <option value="freyrjs">FreyrJS</option>
+            <option value="match">Match</option>
             <option value="local-import">Local import</option>
           </Select>
           <Input icon={<Search size={15} />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Job, title or URL" className="flex-1 sm:w-64" aria-label="Search jobs" />

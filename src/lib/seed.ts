@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
     "yt-dlp": { version: ENGINE_INFO["yt-dlp"].version, enabled: true },
     spotdl: { version: ENGINE_INFO.spotdl.version, enabled: true },
     freyrjs: { version: ENGINE_INFO.freyrjs.version, enabled: true },
+    match: { version: ENGINE_INFO.match.version, enabled: true },
   },
   durationToleranceSec: 2,
   conversionPolicy: "if-unplayable",

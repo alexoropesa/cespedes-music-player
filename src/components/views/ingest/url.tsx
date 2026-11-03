@@ -8,7 +8,7 @@ import { toast } from "@/lib/toast";
 import { codecLabel } from "@/lib/seed";
 import type { EngineId } from "@/lib/types";
 import { ENGINES } from "@/lib/types";
-import type { HealthResponse, InspectResponse } from "@/lib/worker-types";
+import type { HealthResponse, InspectResponse, MatchFlag } from "@/lib/worker-types";
 import { cx, fmtBytes, fmtDuration, hostOf } from "@/lib/util";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { CodecBadge, Pill } from "@/components/ui/badges";
@@ -18,18 +18,33 @@ import { AuthorizationFields, IdentityFields, PlaylistSelect, authValid, commitA
 import { BASIS_LABEL } from "@/components/tracks";
 
 const STEPS = ["Source", "Identity", "Authorization", "Review"] as const;
-const ENGINE_LABEL: Record<EngineId, string> = { "yt-dlp": "yt-dlp", spotdl: "spotDL", freyrjs: "FreyrJS" };
+const ENGINE_LABEL: Record<EngineId, string> = { "yt-dlp": "yt-dlp", spotdl: "spotDL", freyrjs: "FreyrJS", match: "Match" };
 const ENGINE_INPUT: Record<EngineId, string> = {
   "yt-dlp": "Direct source URL (YouTube, SoundCloud, Bandcamp, Commons…)",
   spotdl: "Spotify track link — audio matched on YouTube Music",
   freyrjs: "Spotify, Apple Music or Deezer track link — matched on YouTube Music",
+  match: "Spotify track link — best-matching YouTube upload with the highest-quality audio, picked automatically (no Spotify credentials needed)",
+};
+const FLAG_TEXT: Record<MatchFlag, string> = {
+  live: "Live",
+  cover: "Cover",
+  remix: "Remix / edit",
+  "other-artist": "Credits another artist",
+  altered: "Sped up / slowed",
+  karaoke: "Karaoke",
+  instrumental: "Instrumental",
+  acapella: "Vocals only",
+  extended: "Extended",
+  "lyric-video": "Lyric video",
+  "low-quality": "Low quality",
+  "duration-mismatch": "Duration differs",
 };
 
 /** Picks the engine that can take this link. */
 function engineFor(url: string): EngineId | null {
   const h = hostOf(url);
   if (!h) return null;
-  if (h === "open.spotify.com" || h === "spotify.link") return "spotdl";
+  if (h === "open.spotify.com" || h === "spotify.link") return "match";
   if (h === "music.apple.com" || h.endsWith("deezer.com")) return "freyrjs";
   return "yt-dlp";
 }
@@ -67,6 +82,8 @@ export function UrlIngestView() {
   const installed = (e: EngineId) => !!health?.engines[e].version;
   const meta = result?.ok ? result.meta : null;
   const fmt = meta?.formats.find((f) => f.id === formatId) ?? meta?.formats[0];
+  /** Match engine: the YouTube upload chosen automatically (best match, then best audio). */
+  const pick = meta?.matched;
   const durOk = meta ? meta.durationSec <= settings.maxDurationMin * 60 : false;
   const sizeOk = fmt ? !fmt.sizeBytes || fmt.sizeBytes <= settings.maxSizeMB * 1048576 : false;
 
@@ -86,7 +103,7 @@ export function UrlIngestView() {
     setInspecting(true);
     setResult(null);
     try {
-      const r = await fetch("/api/worker/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: target.trim(), engine: eng }), cache: "no-store" });
+      const r = await fetch("/api/worker/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: target.trim(), engine: eng, toleranceSec: settings.durationToleranceSec }), cache: "no-store" });
       const data = (await r.json()) as InspectResponse | { error: string };
       const res: InspectResponse = "error" in data ? { ok: false, engine: eng, code: "ENGINE_ERROR", message: data.error } : data;
       setResult(res);
@@ -108,10 +125,14 @@ export function UrlIngestView() {
     if (!meta || !fmt || !result?.ok) return;
     const authorizationId = commitAuthorization(auth);
     const ident = commitIdentity(identity);
-    const { thumbnailUrl: _t, license: _l, reference, metadataAfterDownload: _m, ...source } = meta;
+    const { thumbnailUrl: _t, license: _l, reference, metadataAfterDownload: _m, matched: _c, ...base } = meta;
     void _t;
     void _l;
     void _m;
+    void _c;
+    // Match: provenance records the upload that was actually downloaded; the
+    // Spotify link stays as the source URL and the request as the reference.
+    const source = pick ? { ...base, sourceId: pick.id, channel: pick.channel } : base;
     const job = actions.createJob({
       mode: "worker",
       tool: engine,
@@ -122,7 +143,9 @@ export function UrlIngestView() {
       authorizationId,
       playlistId: playlistId || undefined,
       scenario: "ok",
-      review: reference ? { reasons: [], requested: { title: reference.title, artist: reference.artist, durationSec: reference.durationSec }, decision: "accepted", decidedAt: Date.now() } : undefined,
+      review: reference
+        ? { reasons: pick ? pick.flags.map((f) => FLAG_TEXT[f]) : [], requested: { title: reference.title, artist: reference.artist, durationSec: reference.durationSec }, decision: "accepted", decidedAt: Date.now() }
+        : undefined,
     });
     setQueued({ code: job.code, id: job.id });
     toast({ tone: "success", title: `${job.code} queued`, description: `${ENGINE_LABEL[engine]} downloads it on this PC; FFmpeg validates it before it reaches the library.` });
@@ -185,7 +208,7 @@ export function UrlIngestView() {
                   The app server could not report its engines. Restart it on this PC and reload the page.
                 </Notice>
               )}
-              <Card title="Source URL" description="Metadata and formats are read without downloading anything.">
+              <Card title="Source URL" description={engine === "match" ? "Spotify metadata, then a short sample of the closest YouTube uploads is analyzed to pick the best audio — nothing is kept." : "Metadata and formats are read without downloading anything."}>
                 <form
                   className="space-y-4"
                   onSubmit={(e) => {
@@ -201,7 +224,7 @@ export function UrlIngestView() {
                       onChange={(e) => {
                         setUrl(e.target.value);
                         const suggested = engineFor(e.target.value);
-                        if (suggested && suggested !== engine && (suggested !== "spotdl" || installed("spotdl"))) setEngine(suggested);
+                        if (suggested && suggested !== engine && (!health || installed(suggested))) setEngine(suggested);
                         setResult(null);
                       }}
                       placeholder="https://… link to a track you are authorized to keep"
@@ -245,7 +268,7 @@ export function UrlIngestView() {
                     </div>
                   </div>
                   <p className="mt-4 text-[12.5px] text-fg-3">
-                    {ENGINE_LABEL[engine]} is reading metadata from {hostOf(url)} — nothing is downloaded…
+                    {engine === "match" ? "Match is reading Spotify, finding the right version on YouTube and measuring the audio of the closest uploads — this takes a few seconds…" : `${ENGINE_LABEL[engine]} is reading metadata from ${hostOf(url)} — nothing is downloaded…`}
                   </p>
                 </Card>
               )}
@@ -306,6 +329,21 @@ export function UrlIngestView() {
                         <span>
                           {meta.reference ? "Audio" : "Channel"}: <span className="text-fg">{meta.channel}</span>
                         </span>
+                        {pick && (
+                          <a href={pick.url} target="_blank" rel="noreferrer noopener" title={pick.title} className="font-semibold text-fg-2 underline underline-offset-2 hover:text-fg">
+                            Listen on YouTube
+                          </a>
+                        )}
+                        {pick?.quality &&
+                          (pick.quality.full ? (
+                            <Pill tone="success" title="Treble reaches the top of the spectrum: not re-encoded from a low-bitrate MP3">
+                              Full-range audio
+                            </Pill>
+                          ) : (
+                            <Pill tone="warning" title="The treble is cut off: this upload was re-encoded from a compressed copy">
+                              Cut at ≈{pick.quality.cutoffKHz} kHz
+                            </Pill>
+                          ))}
                         {!meta.reference && <Pill title="The uploader/channel does not identify the artist">Not a confirmed artist</Pill>}
                       </div>
                       {meta.reference && (
@@ -343,7 +381,7 @@ export function UrlIngestView() {
                   ))}
 
                   <div className="mt-5">
-                    <div className="mb-2 text-[12.5px] font-semibold">{engine === "yt-dlp" ? "Available audio formats" : "Output"}</div>
+                    <div className="mb-2 text-[12.5px] font-semibold">{engine === "yt-dlp" ? "Available audio formats" : engine === "match" ? "Audio to download" : "Output"}</div>
                     <div role="radiogroup" aria-label="Format" className="overflow-hidden rounded-xl border border-line">
                       {meta.formats.map((f, i) => {
                         const over = !!f.sizeBytes && f.sizeBytes > settings.maxSizeMB * 1048576;
@@ -364,7 +402,7 @@ export function UrlIngestView() {
                               {f.asrHz ? ` · ${(f.asrHz / 1000).toFixed(1)} kHz` : ""}
                             </span>
                             <span className={cx("ml-auto font-mono text-[12px]", over ? "text-warn" : "text-fg-2")}>{f.sizeBytes ? `≈ ${fmtBytes(f.sizeBytes)}` : "size unknown"}</span>
-                            {i === 0 && engine === "yt-dlp" && <Pill tone="accent">Best audio · as published</Pill>}
+                            {i === 0 && (engine === "yt-dlp" || engine === "match") && <Pill tone="accent">Best audio · as published</Pill>}
                           </button>
                         );
                       })}
@@ -404,6 +442,7 @@ export function UrlIngestView() {
                 items={[
                   { k: "Source", v: <span className="break-all font-mono text-[12px]">{meta.url}</span> },
                   { k: "Engine", v: `${ENGINE_LABEL[engine]} ${result.toolVersion}` },
+                  ...(pick ? [{ k: "Matched upload", v: <span className="break-all">{pick.title} · {pick.channel} · <span className="font-mono text-[12px]">{pick.id}</span></span> }] : []),
                   { k: "Format", v: fmt.codec !== "unknown" ? `${codecLabel(fmt.codec)}${fmt.abrKbps ? ` ${fmt.abrKbps} kbps` : ""} · ${fmt.container.toUpperCase()}${fmt.sizeBytes ? ` · ≈ ${fmtBytes(fmt.sizeBytes)}` : ""}` : `id ${fmt.id} · codec read after download` },
                   { k: "Track", v: `${identity.title} — ${identity.artistId ? artists.find((a) => a.id === identity.artistId)?.name : `${identity.newArtist.name} (new, ${identity.newArtist.tier})`}` },
                   { k: "Authorization", v: auth.mode === "existing" ? `${selectedAuth?.code} · ${selectedAuth?.holder}` : `New · ${BASIS_LABEL[auth.draft.basis]} · ${auth.draft.holder}` },

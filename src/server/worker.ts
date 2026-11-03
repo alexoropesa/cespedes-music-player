@@ -3,8 +3,9 @@
  *
  * Runs inside the Next.js server process on the client's PC (TBD-09: internal
  * process for the pilot). It inspects sources without downloading, downloads
- * ONE job at a time into an isolated staging folder with yt-dlp, spotDL or
- * FreyrJS, and probes/decodes the result with FFmpeg. The browser app owns the
+ * ONE job at a time into an isolated staging folder with yt-dlp, spotDL,
+ * FreyrJS or the Match engine (Spotify reference -> operator-picked YouTube
+ * upload, see ./match.ts), and probes/decodes the result with FFmpeg. The browser app owns the
  * job record, authorization and library; it pulls the validated bytes from
  * here and the staging folder is removed afterwards.
  */
@@ -15,8 +16,9 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { killTree, resolveTool, runTool, toolVersion, type ToolId } from "./tools";
 import { decodeCheck, ffprobe, publishToLibrary, sha256File } from "./library";
+import { BOT_CHECK, MatchError, fetchSpotifyTrack, findCandidates, measureQuality, sampleStream, saveCover, spotifyTrackId, type AudioQuality } from "./match";
 import type { EngineId } from "@/lib/types";
-import type { CreateWorkerJob, HealthResponse, InspectMeta, InspectResponse, WorkerFailureCode, WorkerJobState } from "@/lib/worker-types";
+import type { CreateWorkerJob, HealthResponse, InspectMeta, MatchCandidate, MatchFlag, InspectResponse, WorkerFailureCode, WorkerJobState } from "@/lib/worker-types";
 
 export const STAGING_ROOT = path.join(process.cwd(), ".worker", "staging");
 const AUDIO_EXT = ["opus", "webm", "m4a", "mp4", "mp3", "ogg", "oga", "flac", "wav", "aac", "weba", "mka"];
@@ -32,8 +34,10 @@ const spotifyCreds = () =>
 const SPOTIFY_SLOW =
   "Spotify did not answer in time. spotDL's shared API credentials are probably rate-limited — wait a few minutes, or set the client's own Spotify app credentials in BF_SPOTIFY_CLIENT_ID and BF_SPOTIFY_CLIENT_SECRET (TBD-04).";
 
-const ENGINE_TOOL: Record<EngineId, ToolId> = { "yt-dlp": "yt-dlp", spotdl: "spotdl", freyrjs: "freyr" };
-const ENGINE_NAME: Record<EngineId, string> = { "yt-dlp": "yt-dlp", spotdl: "spotDL", freyrjs: "FreyrJS" };
+const ENGINE_TOOL: Record<EngineId, ToolId> = { "yt-dlp": "yt-dlp", spotdl: "spotdl", freyrjs: "freyr", match: "yt-dlp" };
+const ENGINE_NAME: Record<EngineId, string> = { "yt-dlp": "yt-dlp", spotdl: "spotDL", freyrjs: "FreyrJS", match: "Match" };
+/** Match job format id: "<YouTube video id>:<yt-dlp audio format id>" (the format part is optional). */
+const MATCH_FORMAT = /^([A-Za-z0-9_-]{11})(?::([A-Za-z0-9_-]{1,24}))?$/;
 
 /* ------------------------------------------------------------------ */
 /* registry (survives dev hot reloads)                                 */
@@ -75,6 +79,7 @@ export async function health(): Promise<HealthResponse> {
       "yt-dlp": { id: "yt-dlp", name: "yt-dlp", version: yt },
       spotdl: { id: "spotdl", name: "spotDL", version: sp },
       freyrjs: { id: "freyrjs", name: "FreyrJS", version: fr },
+      match: { id: "match", name: "Match (yt-dlp)", version: yt },
     },
     ffmpeg: { id: "ffmpeg", name: "FFmpeg", version: ff },
     ffprobe: { id: "ffprobe", name: "ffprobe", version: fp },
@@ -163,9 +168,11 @@ interface YtFormat {
   filesize?: number | null;
   filesize_approx?: number | null;
   format_note?: string;
+  url?: string;
+  http_headers?: Record<string, string>;
 }
 
-export async function inspect(rawUrl: string, engine: EngineId): Promise<InspectResponse> {
+export async function inspect(rawUrl: string, engine: EngineId, toleranceSec = 2): Promise<InspectResponse> {
   const c = classify(rawUrl);
   if (!c) return { ok: false, engine, code: "INVALID_URL", message: "Enter a full http(s) URL." };
   const version = await toolVersion(ENGINE_TOOL[engine]);
@@ -177,13 +184,17 @@ export async function inspect(rawUrl: string, engine: EngineId): Promise<Inspect
 
   if (engine === "yt-dlp") {
     if (c.kind !== "web") {
-      return { ok: false, engine, code: "WRONG_ENGINE", message: "Streaming-catalog links (Spotify, Apple Music, Deezer) carry no downloadable audio. Use spotDL or FreyrJS, which match the reference to an audio source.", suggest: c.kind === "spotify-track" ? ["spotdl", "freyrjs"] : ["freyrjs"] };
+      return { ok: false, engine, code: "WRONG_ENGINE", message: "Streaming-catalog links (Spotify, Apple Music, Deezer) carry no downloadable audio. Use Match, spotDL or FreyrJS, which match the reference to an audio source.", suggest: c.kind === "spotify-track" ? ["match", "spotdl", "freyrjs"] : ["freyrjs"] };
     }
     return inspectYtDlp(c.url, version);
   }
   if (engine === "spotdl") {
     if (c.kind !== "spotify-track") return { ok: false, engine, code: "WRONG_ENGINE", message: "spotDL takes a Spotify track link. Use yt-dlp for direct source URLs, or FreyrJS for Apple Music and Deezer.", suggest: c.kind === "web" ? ["yt-dlp"] : ["freyrjs"] };
     return inspectSpotify(c.url, engine, version);
+  }
+  if (engine === "match") {
+    if (c.kind !== "spotify-track") return { ok: false, engine, code: "WRONG_ENGINE", message: "Match takes a Spotify track link. Use yt-dlp for direct source URLs, or FreyrJS for Apple Music and Deezer.", suggest: c.kind === "web" ? ["yt-dlp"] : ["freyrjs"] };
+    return inspectMatch(c.url, version, toleranceSec);
   }
   // FreyrJS
   if (c.kind === "web") return { ok: false, engine, code: "WRONG_ENGINE", message: "FreyrJS takes Spotify, Apple Music or Deezer track links. Use yt-dlp for direct source URLs.", suggest: ["yt-dlp"] };
@@ -220,6 +231,25 @@ function plainText(s: string) {
   return t.split(/\s+label QS:/)[0].trim();
 }
 
+/** Audio-only formats of a yt-dlp info dict, best first (falls back to the file itself). */
+function audioFormats(d: Record<string, unknown>, duration: number) {
+  const formats = ((d.formats as YtFormat[] | undefined) ?? [])
+    .filter((f) => (!f.vcodec || f.vcodec === "none") && f.acodec !== "none" && !/storyboard|mhtml/.test(f.format_note ?? "") && f.ext !== "mhtml")
+    .reverse() // yt-dlp lists worst → best
+    .map((f) => {
+      const ext = f.ext ?? "bin";
+      const kbps = Math.round(Number(f.abr ?? f.tbr ?? 0));
+      const size = Number(f.filesize ?? f.filesize_approx ?? 0) || (kbps && duration ? Math.round((kbps * 1000 * duration) / 8) : 0);
+      return { id: f.format_id, ext, codec: normCodec(f.acodec, ext), container: containerOf(ext), abrKbps: kbps, asrHz: Number(f.asr ?? 0), sizeBytes: size };
+    });
+  if (!formats.length) {
+    // Single-file sources (e.g. a direct audio link) report the file itself.
+    const ext = String(d.ext ?? "bin");
+    formats.push({ id: String(d.format_id ?? "best"), ext, codec: normCodec(d.acodec as string, ext), container: containerOf(ext), abrKbps: Math.round(Number(d.abr ?? d.tbr ?? 0)), asrHz: Number(d.asr ?? 0), sizeBytes: Number(d.filesize ?? d.filesize_approx ?? 0) });
+  }
+  return formats;
+}
+
 async function inspectYtDlp(u: URL, version: string): Promise<InspectResponse> {
   const r = await runTool("yt-dlp", ["-J", "--no-playlist", "--no-warnings", "--", u.toString()], { timeoutMs: 60_000 });
   let d: Record<string, unknown> | null = null;
@@ -237,20 +267,7 @@ async function inspectYtDlp(u: URL, version: string): Promise<InspectResponse> {
     return { ok: false, engine: "yt-dlp", code: "PLAYLIST", message: "This URL resolves to a playlist. Each track needs its own selection (RF-ING-09)." };
   }
   const duration = Math.round(Number(d.duration ?? 0));
-  const formats = ((d.formats as YtFormat[] | undefined) ?? [])
-    .filter((f) => (!f.vcodec || f.vcodec === "none") && f.acodec !== "none" && !/storyboard|mhtml/.test(f.format_note ?? "") && f.ext !== "mhtml")
-    .reverse() // yt-dlp lists worst → best
-    .map((f) => {
-      const ext = f.ext ?? "bin";
-      const kbps = Math.round(Number(f.abr ?? f.tbr ?? 0));
-      const size = Number(f.filesize ?? f.filesize_approx ?? 0) || (kbps && duration ? Math.round((kbps * 1000 * duration) / 8) : 0);
-      return { id: f.format_id, ext, codec: normCodec(f.acodec, ext), container: containerOf(ext), abrKbps: kbps, asrHz: Number(f.asr ?? 0), sizeBytes: size };
-    });
-  if (!formats.length) {
-    // Single-file sources (e.g. a direct audio link) report the file itself.
-    const ext = String(d.ext ?? "bin");
-    formats.push({ id: String(d.format_id ?? "best"), ext, codec: normCodec(d.acodec as string, ext), container: containerOf(ext), abrKbps: Math.round(Number(d.abr ?? d.tbr ?? 0)), asrHz: Number(d.asr ?? 0), sizeBytes: Number(d.filesize ?? d.filesize_approx ?? 0) });
-  }
+  const formats = audioFormats(d, duration);
   const meta: InspectMeta = {
     url: String(d.webpage_url ?? u.toString()),
     platform: platformOf(u, d.extractor_key as string),
@@ -323,6 +340,119 @@ async function inspectSpotify(u: URL, engine: EngineId, version: string): Promis
   }
 }
 
+type Stream = ReturnType<typeof audioFormats>[number];
+
+/**
+ * Best audio stream of a YouTube upload (Opus wins near-ties: it is worth
+ * ~10 kbps over AAC at these rates) plus its resolved URL, so a sample can be
+ * fetched without asking YouTube again.
+ */
+async function bestAudioOf(url: string, duration: number): Promise<{ f: Stream; src?: { url: string; headers: Record<string, string> } } | { error: "bot" | "unreadable" }> {
+  const r = await runTool("yt-dlp", ["-J", "--no-playlist", "--no-warnings", "--", url], { timeoutMs: 45_000 });
+  let d: Record<string, unknown> | null;
+  try {
+    d = JSON.parse(r.stdout) as Record<string, unknown> | null;
+  } catch {
+    d = null;
+  }
+  if (!d) return { error: /not a bot|sign in to confirm/i.test(r.stderr) ? "bot" : "unreadable" };
+  const q = (f: Stream) => f.abrKbps + (f.codec === "opus" ? 10 : 0);
+  const f = [...audioFormats(d, duration)].sort((a, b) => q(b) - q(a))[0];
+  if (!f) return { error: "unreadable" };
+  const raw = ((d.formats as YtFormat[] | undefined) ?? []).find((x) => x.format_id === f.id);
+  return { f, src: raw?.url ? { url: raw.url, headers: raw.http_headers ?? {} } : undefined };
+}
+
+/** Version markers that make an upload a different recording (lyric videos are the same audio). */
+const WRONG_VERSION = new Set<MatchFlag>(["live", "cover", "remix", "other-artist", "altered", "karaoke", "instrumental", "acapella", "extended"]);
+
+/**
+ * Picks the upload without asking:
+ * 1. the right recording — no live/cover/remix/instrumental… markers — within
+ *    the duration tolerance the validator will apply;
+ * 2. the closest matches (≤ 20 points from the best, up to 4);
+ * 3. among those, the best measured audio quality: the first ~60 s of each
+ *    stream is sampled and its treble measured, because a re-upload of an old
+ *    MP3 sounds dull at any bitrate YouTube reports. Near-equal quality
+ *    (within 6 dB) falls back to the match score, then the stream bitrate.
+ */
+async function inspectMatch(u: URL, version: string, toleranceSec: number): Promise<InspectResponse> {
+  const id = spotifyTrackId(u);
+  if (!id) return { ok: false, engine: "match", code: "INVALID_URL", message: "This Spotify link has no track id. Open the track in Spotify and use Share › Copy song link." };
+  await ensureStaging();
+  const dir = path.join(STAGING_ROOT, `match-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  try {
+    const ref = await fetchSpotifyTrack(id);
+    const all = await findCandidates(ref, 12);
+    const right = all.filter((c) => !c.flags.some((f) => WRONG_VERSION.has(f)));
+    const pool = right.filter((c) => c.deltaSec <= toleranceSec);
+    if (!pool.length) {
+      const near = right[0] ?? all[0];
+      return {
+        ok: false,
+        engine: "match",
+        code: "UNSUPPORTED",
+        message: near
+          ? `No YouTube upload of “${ref.title}” by ${ref.artists.join(", ")} matches the Spotify duration within ±${toleranceSec} s (closest: ${near.deltaSec} s off). Nothing was picked — raise the tolerance in Settings › Validation or use another engine.`
+          : `No YouTube upload was found for “${ref.title}” by ${ref.artists.join(", ")}.`,
+      };
+    }
+
+    await mkdir(dir, { recursive: true });
+    const finalists = pool.filter((c) => c.score >= pool[0].score - 20).slice(0, 4);
+    const probed = await Promise.all(
+      finalists.map(async (c) => {
+        const a = await bestAudioOf(c.url, c.durationSec);
+        if ("error" in a) return { c, error: a.error };
+        let quality: AudioQuality | null = null;
+        const sample = path.join(dir, `${c.id}.${a.f.ext}`);
+        if (a.src && (await sampleStream(a.src.url, a.src.headers, sample))) quality = await measureQuality(sample, c.durationSec > 40 ? 10 : 0);
+        return { c: quality ? { ...c, quality } : c, f: a.f, quality };
+      }),
+    );
+    const readable = probed.filter((p): p is { c: MatchCandidate; f: Stream; quality: AudioQuality | null } => "f" in p);
+    if (!readable.length) {
+      if (probed.some((p) => "error" in p && p.error === "bot")) return { ok: false, engine: "match", code: "ACCESS_REQUIRED", message: BOT_CHECK };
+      return { ok: false, engine: "match", code: "NETWORK", message: "YouTube did not return the audio formats of the matched uploads. Try again in a moment." };
+    }
+    const hf = (x: { quality: AudioQuality | null }) => x.quality?.hfDb ?? -999;
+    const streamQ = (x: { f: Stream }) => x.f.abrKbps + (x.f.codec === "opus" ? 10 : 0);
+    const { c: best, f, quality } = readable.sort((a, b) => (Math.abs(hf(a) - hf(b)) > 6 ? hf(b) - hf(a) : 0) || b.c.score - a.c.score || streamQ(b) - streamQ(a))[0];
+
+    const meta: InspectMeta = {
+      url: ref.url,
+      platform: "YouTube · matched to Spotify",
+      sourceId: best.id,
+      title: ref.title,
+      channel: best.channel,
+      durationSec: Math.round(ref.durationSec),
+      bitrateKbps: f.abrKbps,
+      album: ref.album,
+      artistGuess: ref.artists[0] ?? "",
+      formats: [{ ...f, id: `${best.id}:${f.id}` }],
+      coverSeed: ref.url,
+      thumbnailUrl: ref.coverUrl,
+      reference: { provider: "spotify", title: ref.title, artist: ref.artists.join(", "), album: ref.album, durationSec: Math.round(ref.durationSec), isrc: ref.isrc },
+      matched: best,
+    };
+    const measured = readable.filter((p) => p.quality).length;
+    const warnings = [
+      `Spotify only supplies the reference. The audio is “${best.title}” (${best.channel}): the right version of the track with the best measured audio among the ${readable.length} closest uploads${measured < readable.length ? ` (${measured} could be measured)` : ""}, kept as received.`,
+    ];
+    if (quality && !quality.full)
+      warnings.push(`Even the best upload found is cut off at about ${quality.cutoffKHz} kHz — compressed quality, likely re-encoded from an old MP3. No cleaner copy was among the closest matches; listen before queuing or look for an authorized file.`);
+    if (!quality) warnings.push("The audio quality of the chosen upload could not be measured — listen before queuing.");
+    if (best.score < 60) warnings.push("Low-confidence match — listen to it before queuing.");
+    if (ref.via === "embed") warnings.push("Read from Spotify's public embed page (no album or ISRC). Set BF_SPOTIFY_CLIENT_ID and BF_SPOTIFY_CLIENT_SECRET to use the Web API instead.");
+    return { ok: true, engine: "match", toolVersion: version, meta, warnings };
+  } catch (e) {
+    if (e instanceof MatchError) return { ok: false, engine: "match", code: e.code, message: e.message };
+    return { ok: false, engine: "match", code: "ENGINE_ERROR", message: (e as Error).message || "Match failed" };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* jobs                                                                */
 /* ------------------------------------------------------------------ */
@@ -340,6 +470,8 @@ export async function createJob(input: CreateWorkerJob): Promise<{ ok: true; sta
   if (input.engine === "yt-dlp" && c.kind !== "web") return { ok: false, status: 400, message: "yt-dlp takes direct source URLs only" };
   if (input.engine === "spotdl" && c.kind !== "spotify-track") return { ok: false, status: 400, message: "spotDL takes Spotify track links only" };
   if (input.engine === "freyrjs" && c.kind === "web") return { ok: false, status: 400, message: "FreyrJS takes Spotify, Apple Music or Deezer track links" };
+  if (input.engine === "match" && (c.kind !== "spotify-track" || !spotifyTrackId(c.url))) return { ok: false, status: 400, message: "Match takes Spotify track links only" };
+  if (input.engine === "match" && !MATCH_FORMAT.test(input.formatId ?? "")) return { ok: false, status: 400, message: "Match needs the matched YouTube video id" };
   const version = await toolVersion(ENGINE_TOOL[input.engine]);
   if (!version) return { ok: false, status: 503, message: `${ENGINE_NAME[input.engine]} is not installed on this PC` };
 
@@ -352,7 +484,7 @@ export async function createJob(input: CreateWorkerJob): Promise<{ ok: true; sta
   await mkdir(dir, { recursive: true });
   const entry: Entry = {
     dir,
-    state: { key: input.key, engine: input.engine, toolVersion: version, url: c.url.toString(), status: "downloading", progress: input.engine === "yt-dlp" ? 0 : null, downloadedBytes: 0, startedAt: Date.now(), log: [] },
+    state: { key: input.key, engine: input.engine, toolVersion: version, url: c.url.toString(), status: "downloading", progress: input.engine === "yt-dlp" || input.engine === "match" ? 0 : null, downloadedBytes: 0, startedAt: Date.now(), log: [] },
   };
   reg.jobs.set(input.key, entry);
   void runJob(entry, input).catch((e: unknown) => fail(entry, "ENGINE_ERROR", (e as Error).message || "Worker error", false));
@@ -427,18 +559,30 @@ async function runJob(e: Entry, input: CreateWorkerJob) {
   };
   const ffmpeg = resolveTool("ffmpeg");
   let args: string[];
-  if (input.engine === "yt-dlp") {
+  let coverTask: Promise<unknown> = Promise.resolve();
+  if (input.engine === "yt-dlp" || input.engine === "match") {
+    const match = input.engine === "match";
+    const [, videoId, audioFormat] = match ? MATCH_FORMAT.exec(input.formatId ?? "")! : [];
+    const target = match ? `https://www.youtube.com/watch?v=${videoId}` : input.url;
+    if (match) {
+      // The cover comes from the Spotify reference, not from the video thumbnail.
+      const id = spotifyTrackId(new URL(input.url))!;
+      log(e, `Match: Spotify ${id} → YouTube ${videoId}${audioFormat ? ` · format ${audioFormat}` : ""}`);
+      coverTask = fetchSpotifyTrack(id)
+        .then((ref) => (ref.coverUrl ? saveCover(ref.coverUrl, path.join(e.dir, "cover.jpg")) : false))
+        .then((ok) => log(e, ok ? "Cover saved from Spotify" : "No Spotify cover saved"))
+        .catch(() => log(e, "No Spotify cover saved"));
+    }
     args = [
-      "-f", input.formatId || "bestaudio/best",
+      "-f", match ? (audioFormat ? `${audioFormat}/bestaudio/best` : "bestaudio/best") : input.formatId || "bestaudio/best",
       "--no-playlist", "--newline", "--progress", "--no-warnings", "--no-mtime", "--no-cache-dir",
       "--max-filesize", `${input.maxSizeMB}M`,
       "--progress-template", "download:[bf] %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
       "--print", "after_move:[bf-file] %(filepath)s",
-      "--write-thumbnail", "--convert-thumbnails", "jpg",
-      "-o", `thumbnail:${path.join(e.dir, "cover.%(ext)s")}`,
+      ...(match ? [] : ["--write-thumbnail", "--convert-thumbnails", "jpg", "-o", `thumbnail:${path.join(e.dir, "cover.%(ext)s")}`]),
       "-o", path.join(e.dir, "audio.%(ext)s"),
       ...(ffmpeg ? ["--ffmpeg-location", ffmpeg] : []),
-      "--", input.url,
+      "--", target,
     ];
   } else if (input.engine === "spotdl") {
     args = ["download", input.url, "--output", path.join(e.dir, "{title}.{output-ext}"), "--format", "opus", "--bitrate", "disable", "--threads", "1", "--simple-tui", "--print-errors", "--log-level", "INFO", "--headless", ...spotifyCreds(), ...(ffmpeg ? ["--ffmpeg", ffmpeg] : [])];
@@ -457,10 +601,11 @@ async function runJob(e: Entry, input: CreateWorkerJob) {
   });
   clearInterval(guard);
   e.child = undefined;
+  await coverTask;
   if (e.cancelled || e.state.status === "failed") return;
   const output = `${r.stdout}\n${r.stderr}`;
   if (sizeAbort) return fail(e, "SIZE_LIMIT", `The source is larger than the ${input.maxSizeMB} MB limit — download aborted, nothing kept.`, false);
-  if (r.timedOut) return fail(e, "NETWORK", input.engine === "yt-dlp" ? "The engine did not finish within 15 minutes — stopped, partial file removed." : `${SPOTIFY_SLOW} Stopped after 15 minutes; partial file removed.`, true);
+  if (r.timedOut) return fail(e, "NETWORK", input.engine === "yt-dlp" || input.engine === "match" ? "The engine did not finish within 15 minutes — stopped, partial file removed." : `${SPOTIFY_SLOW} Stopped after 15 minutes; partial file removed.`, true);
 
   const audio = await findFile(e.dir, AUDIO_EXT, filePrint ?? undefined);
   if (!audio) {

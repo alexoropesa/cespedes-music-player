@@ -24,6 +24,7 @@ import type {
   Track,
 } from "./types";
 import { uid } from "./util";
+import { ENGINE_INFO } from "./catalog";
 import { idbClear, idbDel } from "./idb";
 
 const KEY = "bitferalda.backoffice.state";
@@ -560,6 +561,8 @@ export const actions = {
           "yt-dlp": s.settings.engines["yt-dlp"].version,
           spotdl: s.settings.engines.spotdl.version,
           freyrjs: s.settings.engines.freyrjs.version,
+          // Workspaces saved before the Match engine existed have no entry for it.
+          match: s.settings.engines.match?.version ?? ENGINE_INFO.match.version,
         },
       };
       return pushAudit({ ...s, benchRuns: [...s.benchRuns, run] }, "benchmark.run.started", `Started ${run.code} · ${sampleIds.length} samples × ${engines.length} engines`, "info", run.code);
