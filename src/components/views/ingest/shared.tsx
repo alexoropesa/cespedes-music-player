@@ -107,8 +107,9 @@ export interface AuthValue {
 }
 
 export const emptyAuth = (basis: AuthBasis = "rights-holder"): AuthValue => ({
-  // With no usable record yet (fresh workspace), start on "record new".
-  mode: getState().authorizations.some((a) => isUsableStatus(authStatus(a, Date.now()))) ? "existing" : "new",
+  // Deterministic (server and client render the same); AuthorizationFields
+  // switches to "new" when there is no usable record to pick.
+  mode: "existing",
   authorizationId: "",
   draft: { basis, holder: "", scope: ["copy", "retain"], territory: "ES", validUntil: "", evidence: "", notes: "" },
   confirmed: false,
@@ -150,10 +151,12 @@ const BASIS_DESC: Record<AuthBasis, string> = {
   license: "A license whose terms cover copy and retention.",
 };
 
-export function AuthorizationFields({ value, onChange }: { value: AuthValue; onChange: (v: AuthValue) => void }) {
+export function AuthorizationFields({ value: given, onChange }: { value: AuthValue; onChange: (v: AuthValue) => void }) {
   const auths = useStore((s) => s.authorizations);
   const now = useNow();
   const usable = auths.filter((a) => isUsableStatus(authStatus(a, now)));
+  // No usable record to pick (e.g. a fresh workspace): show "record new"; the first edit stores that mode.
+  const value: AuthValue = given.mode === "existing" && !given.authorizationId && !usable.length ? { ...given, mode: "new" } : given;
   const blocked = auths.filter((a) => !isUsableStatus(authStatus(a, now)));
   const selected = auths.find((a) => a.id === value.authorizationId);
   const d = value.draft;

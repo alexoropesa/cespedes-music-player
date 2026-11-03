@@ -268,7 +268,10 @@ export function TracksView() {
         open={!!delTrack}
         onClose={() => setDelId(null)}
         title={`Delete “${delTrack?.title}”?`}
-        description="Removes the track, its original and derivatives from the library and from every playlist. Never automatic; cannot be undone."
+        description={(() => {
+          const f = files.find((x) => x.id === delTrack?.originalFileId);
+          return `Removes the track from the library and every playlist. ${f?.location === "external" ? "The file stays in your music folder." : f?.audio === "disk" ? "Its file is deleted from the library folder." : "Its stored audio is deleted from this browser."} Never automatic; cannot be undone.`;
+        })()}
         confirmLabel="Delete track"
         requireText={delTrack?.code}
         onConfirm={() => {

@@ -11,6 +11,7 @@ import { idbGet } from "./idb";
 import { synthWav } from "./synth";
 import { actions, getState, trackUsable } from "./store";
 import { toast } from "./toast";
+import { libraryFileUrl } from "./library-types";
 
 export interface PlayerState {
   queue: string[];
@@ -22,7 +23,7 @@ export interface PlayerState {
   repeat: "off" | "all" | "one";
   shuffle: boolean;
   context?: { kind: "playlist" | "library" | "single"; id?: string; label: string };
-  sourceKind?: "blob" | "synthetic";
+  sourceKind?: "blob" | "synthetic" | "disk";
 }
 
 const initial: PlayerState = { queue: [], index: -1, playing: false, loading: false, volume: 0.8, muted: false, repeat: "off", shuffle: false };
@@ -68,12 +69,14 @@ function emitTime() {
   tls.forEach((l) => l());
 }
 
-async function urlFor(trackId: string): Promise<{ url: string; kind: "blob" | "synthetic" } | null> {
+async function urlFor(trackId: string): Promise<{ url: string; kind: "blob" | "synthetic" | "disk" } | null> {
   const s = getState();
   const t = s.tracks.find((x) => x.id === trackId);
   if (!t) return null;
   const f = s.files.find((x) => x.id === t.originalFileId);
   if (!f) return null;
+  // Files on disk stream from the local server (no internet needed: it runs on this PC).
+  if (f.audio === "disk") return { url: libraryFileUrl(f.path), kind: "disk" };
   const key = f.id;
   if (urlCache.has(key)) return { url: urlCache.get(key)!, kind: f.audio };
   let blob: Blob | undefined;

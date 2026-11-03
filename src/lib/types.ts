@@ -60,8 +60,10 @@ export interface AudioFile {
   sha256: string;
   path: string;
   createdAt: number;
-  /** "synthetic" = demo workspace placeholder audio generated locally; "blob" = real bytes in IndexedDB */
-  audio: "synthetic" | "blob";
+  /** "blob" = real bytes in IndexedDB (imported from disk) · "disk" = file on this PC, read through the local server · "synthetic" = legacy demo */
+  audio: "synthetic" | "blob" | "disk";
+  /** disk files: "managed" = library/originals (downloads) · "external" = in a scan folder, referenced in place and never deleted */
+  location?: "managed" | "external";
   blobKey?: string;
   declaredExt?: string;
 }
@@ -144,7 +146,9 @@ export type FailureCode =
   | "DECODE_ERROR"
   | "MATCH_REJECTED"
   | "CANCELLED"
-  | "INTERRUPTED";
+  | "INTERRUPTED"
+  | "UNSUPPORTED"
+  | "ENGINE_ERROR";
 
 export interface JobFailure {
   code: FailureCode;
@@ -169,7 +173,8 @@ export type Scenario =
 export interface IngestJob {
   id: string;
   code: string;
-  mode: "simulated" | "local-file";
+  /** simulated = legacy demo adapter · local-file = imported from disk · worker = downloaded by the local worker */
+  mode: "simulated" | "local-file" | "worker" | "folder";
   tool: IngestTool;
   toolVersion: string;
   status: JobStatus;
@@ -202,6 +207,8 @@ export interface IngestJob {
   trackId?: string;
   /** local-file mode */
   blobKey?: string;
+  /** folder mode: absolute path of the file in a registered folder */
+  localPath?: string;
   fileName?: string;
   /** simulation: forced hash (duplicate scenario) */
   simHash?: string;

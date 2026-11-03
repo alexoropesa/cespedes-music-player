@@ -211,6 +211,7 @@ export interface NewJobInput {
   review?: IngestJob["review"];
   blobKey?: string;
   fileName?: string;
+  localPath?: string;
 }
 
 export const actions = {
@@ -245,6 +246,7 @@ export const actions = {
         events: [{ at: now, kind: "pending", message: `Job accepted · ${auth?.code ?? "authorization"} recorded before download` }],
         review: input.review,
         blobKey: input.blobKey,
+        localPath: input.localPath,
         fileName: input.fileName,
       };
       return pushAudit({ ...s, jobs: [...s.jobs, created] }, "ingest.job.created", `Queued ${created.code} · ${input.source.title} (${input.tool})`, "info", created.code, {
@@ -371,7 +373,11 @@ export const actions = {
     const t = state.tracks.find((x) => x.id === id);
     if (!t) return;
     const files = state.files.filter((f) => f.trackId === id);
-    for (const f of files) if (f.blobKey) void idbDel(f.blobKey);
+    for (const f of files) {
+      if (f.blobKey) void idbDel(f.blobKey);
+      // Downloads live in library/originals and go with the track; files in your own folders are never deleted.
+      if (f.audio === "disk" && f.location === "managed") void fetch(`/api/library/file?p=${encodeURIComponent(f.path)}`, { method: "DELETE" }).catch(() => undefined);
+    }
     if (t.coverSeed.startsWith("img:")) void idbDel(t.coverSeed.slice(4));
     setState((s) =>
       pushAudit(

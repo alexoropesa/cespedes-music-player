@@ -10,9 +10,16 @@ export function IngestHeader() {
   return (
     <PageHeader
       eyebrow="Ingest"
-      title="Import a track"
-      description="Upload an audio file you are authorized to use. It is validated for real on this device — full decode, real codec, duration, SHA-256 and duplicate check — then stored in the local library for offline playback."
-    />
+      title="Bring in authorized tracks"
+      description="Download from a URL with yt-dlp, spotDL or FreyrJS on this PC, or import a file from disk. Every file is validated for real — full decode, real codec, duration, SHA-256 and duplicates — before it reaches the library."
+    >
+      <SubNav
+        items={[
+          { href: "/ingest", label: "Import from disk", exact: true },
+          { href: "/ingest/url", label: "From URL" },
+        ]}
+      />
+    </PageHeader>
   );
 }
 
@@ -66,6 +73,7 @@ export function LibraryHeader() {
           { href: "/library", label: "Tracks", exact: true, count: tracks.length },
           { href: "/library/artists", label: "Artists", count: artists.length },
           { href: "/library/duplicates", label: "Duplicates", count: dups.filter((d) => !d.dismissed).length },
+          { href: "/library/folders", label: "Folders" },
         ]}
       />
     </PageHeader>

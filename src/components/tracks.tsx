@@ -424,7 +424,7 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
         open={del}
         onClose={() => setDel(false)}
         title={`Delete “${track.title}”?`}
-        description="Removes the track, its original file and derivatives from the library and all playlists. This is never done automatically and cannot be undone."
+        description={`Removes the track from the library and all playlists. ${original?.location === "external" ? `The file stays in your folder: ${original.path}` : original?.audio === "disk" ? `Its file is deleted from the library folder: ${original.path}` : "Its stored audio is deleted from this browser."} This is never done automatically and cannot be undone.`}
         confirmLabel="Delete track"
         requireText={track.code}
         onConfirm={() => {

@@ -23,7 +23,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Operate",
     items: [
       { href: "/", label: "Overview", icon: LayoutDashboard },
-      { href: "/ingest", label: "Import track", icon: Download },
+      { href: "/ingest", label: "Ingest", icon: Download },
       { href: "/queue", label: "Queue monitor", icon: Activity, badge: "queue" },
       { href: "/library", label: "Library", icon: Library },
       { href: "/playlists", label: "Playlists", icon: ListMusic },

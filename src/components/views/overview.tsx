@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, ArrowRight, Ban, CircleCheck, CircleDashed, Clock, Database, FileUp, Library, ListMusic, Play, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Activity, ArrowRight, Link2, Ban, CircleCheck, CircleDashed, Clock, Database, FileUp, Library, ListMusic, Play, ShieldAlert, TriangleAlert } from "lucide-react";
 import { actions, authStatus, isAwaitingReview, trackUsable, useStore } from "@/lib/store";
 import { useNow } from "@/lib/clock";
 import { playQueue, toggle, usePlayer } from "@/lib/player";
@@ -48,11 +48,16 @@ export function OverviewView() {
       <PageHeader
         eyebrow={`${greet}, ${operator.name.split(" ")[0]}`}
         title="Overview"
-        description="Local library: import authorized tracks, validate them for real, keep their provenance, build playlists and play offline."
+        description="Local library: bring in authorized tracks from a URL or from disk, validate them for real, keep their provenance, build playlists and play offline."
         actions={
-          <Button variant="primary" icon={<FileUp size={16} />} onClick={() => router.push("/ingest")}>
-            Import track
-          </Button>
+          <>
+            <Button variant="secondary" icon={<Link2 size={16} />} onClick={() => router.push("/ingest/url")}>
+              From URL
+            </Button>
+            <Button variant="primary" icon={<FileUp size={16} />} onClick={() => router.push("/ingest")}>
+              Import track
+            </Button>
+          </>
         }
       />
       <Body className="space-y-8">
@@ -256,9 +261,10 @@ export function OverviewView() {
         </div>
 
         <Card title="Quick actions" description="Every import records provenance and an authorization before it is stored">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {[
-              { href: "/ingest", icon: <FileUp size={18} />, t: "Import track", d: "Real decode, codec, duration and SHA-256 checks" },
+              { href: "/ingest/url", icon: <Link2 size={18} />, t: "Ingest from URL", d: "yt-dlp, spotDL or FreyrJS on this PC" },
+              { href: "/ingest", icon: <FileUp size={18} />, t: "Import from disk", d: "Real decode, codec, duration and SHA-256 checks" },
               { href: "/library", icon: <Library size={18} />, t: "Library", d: "Validated tracks with provenance" },
               { href: "/playlists", icon: <ListMusic size={18} />, t: "Playlists", d: "Only ready, usable tracks" },
               { href: "/queue", icon: queuePaused ? <Play size={18} /> : <Activity size={18} />, t: queuePaused ? "Resume queue" : "Queue monitor", d: "Pause, cancel or retry (bounded)" },

@@ -173,7 +173,20 @@ No se añadieron estados nuevos. Lo demás se expresa así:
 → Al borrar una pista también sale de la cola del reproductor y su tarea deja de enlazarla (queda una nota en el log de la tarea); las playlists y los duplicados ya la soltaban.
 → Criterio: D-29 aplicado a toda la interfaz; las pestañas comparten un único estado y una acción en una se refleja en las demás.
 
-**Cómo probar:** en *Import track* sube cualquier audio (FLAC, WAV, MP3, M4A/AAC, Opus/Ogg, WebM). Sin registros previos, el formulario abre directamente *Record new authorization*. La tarea pasa por *pending → downloading (copia a staging) → validating → ready*: decodificación completa, codec real de la cabecera, duración, SHA-256 y duplicados. Si subes el mismo archivo dos veces, la segunda falla como duplicado por SHA-256.
+**D-31 · Worker real con yt-dlp, spotDL y FreyrJS (resuelve TBD-09 para el piloto).**
+→ El worker corre dentro del servidor Next.js en la PC del cliente (`src/server/worker.ts`, API en `/api/worker/*`, solo acepta peticiones a `localhost`). Inspecciona sin descargar (`yt-dlp -J`, `spotdl save`), descarga UNA tarea a la vez en `.worker/staging/<job>/` y valida con `ffprobe` y una decodificación completa con `ffmpeg`. La app toma los bytes, calcula el SHA-256, comprueba duplicados, duración frente a la fuente (tolerancia en *Settings › Validation*) y límites, y guarda el original en IndexedDB; el staging se borra.
+→ Reglas por motor: yt-dlp solo URL directas; spotDL solo pistas de Spotify; FreyrJS pistas de Spotify, Apple Music o Deezer. Álbumes y playlists se rechazan (RF-ING-09). La salida de spotDL y FreyrJS se marca siempre como «escrita por el motor», nunca como calidad de origen.
+→ Los motores se buscan en el PATH y en las carpetas de usuario (pip `--user`, npm global, winget), o en `BF_YTDLP`, `BF_SPOTDL`, `BF_FREYR`, `BF_FFMPEG`, `BF_FFPROBE`, `BF_ATOMICPARSLEY`. Se ejecutan sin shell, con la URL como argumento.
+→ spotDL usa por defecto credenciales compartidas de Spotify que se limitan por uso; las del cliente van en `BF_SPOTIFY_CLIENT_ID` y `BF_SPOTIFY_CLIENT_SECRET` (TBD-04). Pendiente: pico de CPU y memoria por tarea (CA-05), revisión manual de coincidencias dudosas (hoy una duración distinta falla como `DURATION_MISMATCH`) y búsqueda por texto.
+→ Criterio: spec `info/SPEC-WORKER-INGESTA.md`, RF-ING-01 a 12, RF-PRO-01/02, RNF-FIA-01/03.
+
+**D-32 · Biblioteca en disco y carpetas de música.**
+→ Las descargas por URL, una vez validadas, se mueven de `.worker/staging/` a `library/originals/<artista>/<título>.<ext>` en la carpeta de la app (fija en el piloto, fuera de git). Borrar la pista borra ese archivo.
+→ En *Library › Folders* el operador agrega carpetas por ruta, cada una con su autorización. Al escanear, cada archivo de audio nuevo (subcarpetas incluidas) es una tarea que se valida en su sitio: ffprobe, decodificación completa con FFmpeg comparando la duración decodificada con la declarada (detecta archivos truncados), SHA-256 y duplicados. Los archivos de esas carpetas nunca se copian, mueven, convierten ni borran; borrar la pista solo la quita de la biblioteca. Quitar la carpeta deja las pistas, pero no se reproducen hasta volver a agregarla.
+→ El reproductor lee los archivos de disco por `/api/library/file` (con Range), que solo sirve rutas dentro de la biblioteca o de una carpeta registrada y solo atiende a `localhost`. Lo importado con *Import from disk* sigue en IndexedDB.
+→ Pendiente: la importación desde el navegador (*Import from disk*) aún no detecta un MP3 truncado cuyas cabeceras declaran la duración completa; la de carpetas y URL sí.
+
+**Cómo probar:** en *Ingest › From URL* pega un enlace de contenido autorizado (por ejemplo un archivo de Wikimedia Commons con licencia libre) y sigue los cuatro pasos. En *Ingest › Import from disk* sube cualquier audio (FLAC, WAV, MP3, M4A/AAC, Opus/Ogg, WebM). Sin registros previos, el formulario abre directamente *Record new authorization*. La tarea pasa por *pending → downloading (copia a staging) → validating → ready*: decodificación completa, codec real de la cabecera, duración, SHA-256 y duplicados. Si subes el mismo archivo dos veces, la segunda falla como duplicado por SHA-256.
 
 ## 10. Pendiente para activar la ingesta por URL, búsqueda y benchmark
 

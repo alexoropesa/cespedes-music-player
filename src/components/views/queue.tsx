@@ -253,8 +253,8 @@ export function WorkerView() {
         <Card title="Isolated sandbox" description="Where downloads happen before anything reaches the library">
           <KV
             items={[
-              { k: "Staging", v: "IndexedDB · one staged blob per job", mono: true },
-              { k: "Library", v: "IndexedDB · original bytes as received", mono: true },
+              { k: "Staging", v: ".worker/staging/<job> on this PC (URL downloads)", mono: true },
+              { k: "Library", v: "library/originals · your folders in place · IndexedDB for disk imports", mono: true },
               { k: "Concurrency", v: <span className="inline-flex items-center gap-2">1 job at a time <Pill icon={<Lock size={10} />}>Pilot rule</Pill></span> },
               { k: "Writes", v: "Only the job's staged blob until it validates" },
               { k: "Execution", v: "Imported files are never executed — only decoded as audio" },

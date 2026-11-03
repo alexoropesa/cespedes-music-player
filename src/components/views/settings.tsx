@@ -9,7 +9,7 @@ import type { Settings } from "@/lib/types";
 import { downloadText, fmtBytes } from "@/lib/util";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/badges";
-import { Field, Input, Segmented, Switch } from "@/components/ui/form";
+import { Field, Input, RangeInput, Segmented, Switch } from "@/components/ui/form";
 import { Body, Card } from "@/components/ui/layout";
 import { ConfirmDialog } from "@/components/ui/overlay";
 
@@ -99,17 +99,31 @@ export function IngestionSettings() {
 }
 
 export function ValidationSettings() {
+  const d = useDraft((s) => ({ durationToleranceSec: s.durationToleranceSec }));
   return (
     <Body className="max-w-4xl">
       <Card title="Validation" description="Runs on every import, in this order. Any failure stops the job and nothing reaches the library.">
-        <Row title="Complete file" desc="The browser's audio decoder must read the stream end to end; truncated or corrupt files fail." locked="RF-04">
+        <Row title="Complete file" desc="The stream must decode end to end — FFmpeg for URL downloads, the browser's decoder for files from disk; truncated or corrupt files fail." locked="RF-04">
           <Pill>Full decode</Pill>
         </Row>
-        <Row title="Real codec detection" desc="Codec, container, sample rate and channels are read from the file header, never from the extension. A mismatching extension is a warning and the real codec is recorded." locked="RF-PRO-01">
-          <Pill>Header parser</Pill>
+        <Row title="Real codec detection" desc="Read from the stream, never from the extension: ffprobe for URL downloads, the header parser for files from disk. A mismatching extension is a warning and the real codec is recorded." locked="RF-PRO-01">
+          <Pill>ffprobe · header</Pill>
         </Row>
         <Row title="Duration" desc="Measured from the decoded audio and checked against the maximum in Settings › Ingestion." locked="RF-ING-06">
           <Pill>Decoded length</Pill>
+        </Row>
+        <Row
+          title="Duration tolerance"
+          desc={
+            <>
+              URL downloads: maximum difference between the file and the source or catalog reference before it fails as a different version. Pending agreement with the client <span className="font-mono">(TBD-10)</span>.
+            </>
+          }
+        >
+          <div className="flex w-56 items-center gap-3">
+            <RangeInput label="Duration tolerance" value={d.value.durationToleranceSec} min={0} max={10} onChange={(v) => d.set({ durationToleranceSec: v })} />
+            <span className="w-12 text-right font-mono text-[13px]">±{d.value.durationToleranceSec}s</span>
+          </div>
         </Row>
         <Row title="Hash algorithm" desc="Computed over the original bytes with Web Crypto." locked="RF-04">
           <Pill>SHA-256</Pill>
@@ -130,10 +144,25 @@ export function ValidationSettings() {
         </Row>
       </Card>
       <Card title="Storage" className="mt-5">
-        <Row title="Library storage" desc="Originals are kept as real bytes in this browser's IndexedDB, available offline. Usage and the persistence request are in Settings › Workspace." locked="Local browser storage">
-          <Pill>IndexedDB · this device</Pill>
+        <Row title="Downloads" desc="URL downloads are moved, once validated, to library/originals/<artist>/<title> in the app folder on this PC. Deleting the track deletes that file." locked="Fixed for the pilot">
+          <Pill>Disk · this PC</Pill>
+        </Row>
+        <Row title="Music folders" desc="Folders you add in Library › Folders are read in place: files are never copied, moved or deleted; deleting a track only removes it from the library." locked="Library › Folders">
+          <Pill>Read in place</Pill>
+        </Row>
+        <Row title="Files imported from disk" desc="Files uploaded in Ingest › Import from disk keep their bytes in this browser's IndexedDB. Usage is in Settings › Workspace." locked="Local browser storage">
+          <Pill>IndexedDB · this browser</Pill>
         </Row>
       </Card>
+      <SaveBar
+        dirty={d.dirty}
+        onDiscard={d.reset}
+        onSave={() => {
+          actions.updateSettings(d.value, "validation");
+          d.reset();
+          toast({ tone: "success", title: "Validation settings saved", description: "New jobs use this tolerance." });
+        }}
+      />
     </Body>
   );
 }

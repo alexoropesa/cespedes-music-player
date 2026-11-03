@@ -320,7 +320,7 @@ function JobDrawerInner({
                 <h4 className="mb-2 text-[12px] font-semibold text-fg-3">Sandbox & limits (snapshot at creation)</h4>
                 <KV
                   items={[
-                    { k: "Staging", v: `IndexedDB · ${job.blobKey ?? job.id}`, mono: true },
+                    { k: "Staging", v: job.mode === "worker" ? `.worker/staging/${job.id}-a${job.retries}` : job.mode === "folder" ? "None · read in place from the folder" : `IndexedDB · ${job.blobKey ?? job.id}`, mono: true },
                     { k: "Concurrency", v: "1 job at a time" },
                     { k: "Max size", v: `${job.limits.maxSizeMB} MB` },
                     { k: "Max duration", v: `${job.limits.maxDurationMin} min` },

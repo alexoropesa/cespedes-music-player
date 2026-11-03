@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local ingestion worker staging
+/.worker/
+
+# on-disk music library (downloads)
+/library/
