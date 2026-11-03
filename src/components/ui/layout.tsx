@@ -53,7 +53,9 @@ export function SubNav({ items }: { items: { href: string; label: string; count?
           >
             {it.label}
             {it.count != null && it.count > 0 && (
-              <span className={cx("rounded-full px-1.5 py-px text-[11px] tabular-nums", active ? "bg-accent/20 text-accent" : "bg-white/[0.07] text-fg-2")}>{it.count}</span>
+              <span className={cx("badge-num inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums", active ? "bg-accent/20 text-accent" : "bg-white/[0.07] text-fg-2")}>
+                <span>{it.count}</span>
+              </span>
             )}
             {active && <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-fg" />}
           </Link>

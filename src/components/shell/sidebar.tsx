@@ -60,11 +60,11 @@ export function Sidebar({ pathname, onNavigate }: { pathname: string | null; onN
                       {count > 0 && (
                         <span
                           className={cx(
-                            "min-w-5 rounded-full px-1.5 text-center text-[11px] font-bold tabular-nums leading-5",
+                            "badge-num inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums",
                             it.badge === "reviews" ? "bg-st-validating/15 text-st-validating" : it.badge === "rights" ? "bg-warn/15 text-warn" : "bg-st-downloading/15 text-st-downloading",
                           )}
                         >
-                          {count}
+                          <span>{count}</span>
                         </span>
                       )}
                     </Link>

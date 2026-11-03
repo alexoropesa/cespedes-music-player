@@ -168,6 +168,13 @@ input[type="range"].range.range-always::-webkit-slider-thumb {
   opacity: 1;
 }
 
+/* Count badges: trim the font's ascender/descender so digits sit at the optical center */
+.badge-num > span {
+  display: block;
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
+}
+
 /* Skeleton shimmer */
 .skeleton {
   background: linear-gradient(
