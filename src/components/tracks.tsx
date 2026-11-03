@@ -3,15 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { Copy, ExternalLink, HardDrive, ListPlus, Pencil, Plus, Trash, Ellipsis, FileMusic, Sparkles } from "lucide-react";
-import { actions, authStatus, isUsableStatus, setState, pushAudit, useStore } from "@/lib/store";
+import { Copy, ExternalLink, HardDrive, ListPlus, Pencil, Plus, Trash, Ellipsis, FileMusic } from "lucide-react";
+import { actions, authStatus, isUsableStatus, useStore } from "@/lib/store";
 import { playQueue, stopIfPlaying, toggle, usePlayer } from "@/lib/player";
 import { useNow } from "@/lib/clock";
 import { toast } from "@/lib/toast";
 import type { Track } from "@/lib/types";
 import { codecLabel, isLossless } from "@/lib/seed";
 import { ENGINE_INFO } from "@/lib/catalog";
-import { cx, fakeSha256, fmtBytes, fmtDate, fmtDateTime, fmtDuration, fmtRelative, shortHash } from "@/lib/util";
+import { cx, fmtBytes, fmtDate, fmtDateTime, fmtDuration, fmtRelative, shortHash } from "@/lib/util";
 import { Button, IconButton, PlayButton } from "./ui/button";
 import { AuthStatusBadge, CodecBadge, Pill, TierBadge } from "./ui/badges";
 import { ConfirmDialog, Drawer, Menu, Modal } from "./ui/overlay";
@@ -151,7 +151,6 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
   const auths = useStore((s) => s.authorizations);
   const playlists = useStore((s) => s.playlists);
   const audit = useStore((s) => s.audit);
-  const settings = useStore((s) => s.settings);
   const jobs = useStore((s) => s.jobs);
   const now = useNow();
   const player = usePlayer();
@@ -178,31 +177,6 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
   const events = audit.filter((e) => e.target === track.code || (job && e.target === job.code)).slice(0, 30);
   const isCurrent = player.queue[player.index] === track.id;
   const tool = track.provenance.tool;
-
-  const createDerivative = () => {
-    if (!original) return;
-    setState((s) => {
-      const id = `file_norm_${track.id}_${s.files.length}`;
-      const d = {
-        ...original,
-        id,
-        kind: "derivative" as const,
-        derivedFrom: original.id,
-        derivativeReason: "Optional loudness normalization (−14 LUFS). Original untouched; normalization ≠ fidelity.",
-        sha256: fakeSha256(id),
-        path: original.path.replace("/originals/", "/derivatives/").replace(/\.(\w+)$/, ".norm-14lufs.$1"),
-        createdAt: Date.now(),
-      };
-      return pushAudit(
-        { ...s, files: [...s.files, d], tracks: s.tracks.map((t) => (t.id === track.id ? { ...t, derivativeIds: [...t.derivativeIds, id] } : t)) },
-        "processing.derivative.created",
-        `Created normalized derivative for ${track.code} (original kept)`,
-        "info",
-        track.code,
-      );
-    });
-    toast({ tone: "success", title: "Derivative created", description: "Linked to its original. The original file was not modified." });
-  };
 
   return (
     <>
@@ -328,7 +302,7 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
                 <KV
                   className="rounded-none border-0 bg-transparent"
                   items={[
-                    { k: "Codec (ffprobe)", v: `${codecLabel(original.codec)}${isLossless(original.codec) ? " · lossless as received" : " · lossy"}` },
+                    { k: "Codec (from header)", v: `${codecLabel(original.codec)}${isLossless(original.codec) ? " · lossless as received" : " · lossy"}` },
                     { k: "Container", v: original.container.toUpperCase() + (original.declaredExt ? ` · .${original.declaredExt}` : "") },
                     { k: "Bitrate", v: `${original.bitrateKbps} kbps` },
                     { k: "Sample rate", v: original.sampleRateHz ? `${(original.sampleRateHz / 1000).toFixed(1)} kHz` : "—" },
@@ -348,35 +322,8 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
                   ]}
                 />
               </div>
-              {original.audio === "synthetic" && (
-                <Notice tone="info" title="Demo workspace">
-                  This record comes from the simulation adapter: metadata mirrors ffprobe output and playback uses a locally synthesized preview. Imports from disk store and validate real bytes.
-                </Notice>
-              )}
-              {tool === "freyrjs" && (
-                <Notice tone="warning" title="Engine re-encoded the audio">
-                  FreyrJS outputs AAC 320 kbps by default. The higher nominal bitrate is not a quality gain over the source and is recorded as the real codec — never as a master.
-                </Notice>
-              )}
               <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <h4 className="text-[13.5px] font-semibold">Derivatives</h4>
-                  <div className="flex gap-1.5">
-                    <Button size="xs" variant="secondary" disabled title="The original is playable here — no compatible derivative needed (no conversion by default).">
-                      Compatible copy
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      icon={<Sparkles size={13} />}
-                      disabled={!settings.normalizeDerivative}
-                      title={settings.normalizeDerivative ? "Create a loudness-normalized derivative" : "Enable optional normalization in Settings › Validation & storage"}
-                      onClick={createDerivative}
-                    >
-                      Normalize (derivative)
-                    </Button>
-                  </div>
-                </div>
+                <h4 className="mb-2 text-[13.5px] font-semibold">Derivatives</h4>
                 {derivs.length ? (
                   <ul className="space-y-2">
                     {derivs.map((d) => (
@@ -394,7 +341,7 @@ export function TrackDrawer({ trackId, onClose }: { trackId: string | null; onCl
                   </ul>
                 ) : (
                   <p className="rounded-xl border border-dashed border-line-strong px-4 py-4 text-[12.5px] text-fg-3">
-                    No derivatives. Policy: no conversion by default — a compatible copy is only generated when the original can&apos;t be played. Raising bitrate or converting to WAV never restores discarded information.
+                    No derivatives. The original is stored exactly as received and plays here as is — nothing is converted. Raising bitrate or converting to WAV never restores discarded information.
                   </p>
                 )}
               </div>

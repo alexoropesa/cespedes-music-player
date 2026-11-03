@@ -3,17 +3,17 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Bookmark, Clock3, Copy, Ellipsis, ExternalLink, FingerprintPattern, ListPlus, Lock, Pencil, Plus, Search, Shuffle, Trash, UserRound, Users } from "lucide-react";
+import { Clock3, Copy, Ellipsis, ExternalLink, FingerprintPattern, ListPlus, Lock, Pencil, Plus, Search, Shuffle, Trash, UserRound, Users } from "lucide-react";
 import { actions, authStatus, isUsableStatus, useStore } from "@/lib/store";
 import { useNow } from "@/lib/clock";
 import { playQueue, stopIfPlaying, toggle, usePlayer } from "@/lib/player";
 import { toast } from "@/lib/toast";
-import { ENGINE_INFO, PROVIDER_LABEL } from "@/lib/catalog";
+import { ENGINE_INFO } from "@/lib/catalog";
 import { isLossless } from "@/lib/seed";
-import type { Artist, ArtistTier, ExternalReference } from "@/lib/types";
+import type { Artist, ArtistTier } from "@/lib/types";
 import { cx, fmtDate, fmtDuration, fmtLongDuration, fmtRelative, hashString, initials, shortHash } from "@/lib/util";
 import { Button, ButtonLink, IconButton, PlayButton } from "@/components/ui/button";
-import { AuthStatusBadge, CodecBadge, Pill, TierBadge } from "@/components/ui/badges";
+import { AuthStatusBadge, CodecBadge, TierBadge } from "@/components/ui/badges";
 import { Chip, Field, Input, Segmented, Select, Textarea, Checkbox } from "@/components/ui/form";
 import { Body, Cover, EmptyState, EqBars, Notice, TD, TH, TR, Table } from "@/components/ui/layout";
 import { ConfirmDialog, Menu, Modal } from "@/components/ui/overlay";
@@ -260,7 +260,7 @@ export function TracksView() {
           </tbody>
         </Table>
       ) : (
-        <EmptyState title="No tracks match" description="Adjust the filters, or bring in new tracks through Ingest." action={<ButtonLink href="/ingest" variant="primary">New ingest</ButtonLink>} />
+        <EmptyState title="No tracks match" description="Adjust the filters, or import a track." action={<ButtonLink href="/ingest" variant="primary">Import track</ButtonLink>} />
       )}
       <TrackDrawer trackId={openTrack} onClose={() => setTrackParam(null)} />
       <EditTrackModal track={editTrack} open={!!editTrack} onClose={() => setEditId(null)} />
@@ -436,119 +436,6 @@ export function ArtistsView() {
         onConfirm={() => {
           if (editingArtist) actions.deleteArtist(editingArtist.id);
           setEditing(null);
-        }}
-      />
-    </Body>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-
-const PROVIDER_TONE: Record<string, "accent" | "success" | "info" | "neutral" | "warning" | "danger"> = {
-  spotify: "success",
-  "apple-music": "danger",
-  youtube: "warning",
-  "youtube-music": "warning",
-  soundcloud: "warning",
-  bandcamp: "info",
-  web: "neutral",
-};
-
-export function ReferencesView() {
-  const refs = useStore((s) => s.references);
-  const now = useNow();
-  const router = useRouter();
-  const [del, setDel] = useState<ExternalReference | null>(null);
-  const [provider, setProvider] = useState("all");
-  const list = refs.filter((r) => provider === "all" || r.provider === provider);
-  const providers = [...new Set(refs.map((r) => r.provider))];
-  const streaming = (p: string) => p === "spotify" || p === "apple-music";
-
-  return (
-    <Body>
-      <Notice className="mb-5" title="References are not audio">
-        A reference stores an identifier, title and origin only. It never appears as ready audio and never plays from the local player. Spotify and Apple Music listening happens through their official SDKs (Connections), never through the library.
-      </Notice>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Chip active={provider === "all"} onClick={() => setProvider("all")} count={refs.length}>
-          All providers
-        </Chip>
-        {providers.map((p) => (
-          <Chip key={p} active={provider === p} onClick={() => setProvider(p)} count={refs.filter((r) => r.provider === p).length}>
-            {PROVIDER_LABEL[p]}
-          </Chip>
-        ))}
-      </div>
-      {list.length ? (
-        <Table>
-          <thead>
-            <tr>
-              <TH>Reference</TH>
-              <TH>Provider</TH>
-              <TH className="hidden md:table-cell">Duration</TH>
-              <TH className="hidden lg:table-cell">Note</TH>
-              <TH>Saved</TH>
-              <TH className="w-12" />
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((r) => (
-              <TR key={r.id}>
-                <TD className="max-w-[320px]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-dashed border-line-strong text-fg-3">
-                      <Bookmark size={16} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold">{r.title}</div>
-                      <div className="truncate text-[12px] text-fg-3">{r.artistName ?? r.channel ?? "—"}</div>
-                    </div>
-                  </div>
-                </TD>
-                <TD>
-                  <span className="flex flex-wrap items-center gap-1.5">
-                    <Pill tone={PROVIDER_TONE[r.provider] ?? "neutral"}>{PROVIDER_LABEL[r.provider]}</Pill>
-                    <Pill>No audio</Pill>
-                  </span>
-                </TD>
-                <TD className="hidden font-mono text-[12.5px] text-fg-2 md:table-cell">{fmtDuration(r.durationSec)}</TD>
-                <TD className="hidden max-w-[260px] truncate text-[12.5px] text-fg-3 lg:table-cell" title={r.note}>
-                  {r.note ?? "—"}
-                </TD>
-                <TD className="whitespace-nowrap text-[12px] text-fg-3">{fmtRelative(r.savedAt, now)}</TD>
-                <TD>
-                  <Menu
-                    items={[
-                      streaming(r.provider)
-                        ? { label: "Find an authorized source", icon: <Search size={15} />, onSelect: () => router.push(`/ingest/search?q=${encodeURIComponent(`${r.title} ${r.artistName ?? ""}`.trim())}`) }
-                        : { label: "Ingest from this source", icon: <Plus size={15} />, onSelect: () => router.push(`/ingest?url=${encodeURIComponent(r.url)}`) },
-                      { label: "Open original link", icon: <ExternalLink size={15} />, onSelect: () => window.open(r.url, "_blank", "noopener") },
-                      { label: "Copy link", icon: <Copy size={15} />, onSelect: () => copyText(r.url, "Link copied") },
-                      { separator: true, label: "s" },
-                      { label: "Remove reference", icon: <Trash size={15} />, danger: true, onSelect: () => setDel(r) },
-                    ]}
-                    trigger={(p) => (
-                      <IconButton label="Reference actions" {...p}>
-                        <Ellipsis size={17} />
-                      </IconButton>
-                    )}
-                  />
-                </TD>
-              </TR>
-            ))}
-          </tbody>
-        </Table>
-      ) : (
-        <EmptyState icon={<Bookmark size={22} />} title="No references saved" description="Save a search result or a provider link as a reference to decide later — nothing is downloaded." />
-      )}
-      <ConfirmDialog
-        open={!!del}
-        onClose={() => setDel(null)}
-        title="Remove reference?"
-        description={`“${del?.title}” will be removed from References. No audio is affected.`}
-        confirmLabel="Remove"
-        onConfirm={() => {
-          if (del) actions.removeReference(del.id);
         }}
       />
     </Body>

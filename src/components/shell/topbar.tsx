@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, FlaskConical, House, Menu as MenuIcon, Plus, Search, WifiOff } from "lucide-react";
+import { Activity, House, Menu as MenuIcon, Plus, Search, WifiOff } from "lucide-react";
 import { useIsOffline } from "@/lib/connectivity";
 import { isAwaitingReview, useStore } from "@/lib/store";
 import { Button, IconButton } from "@/components/ui/button";
@@ -75,12 +75,6 @@ export function Topbar({ onOpenNav, onOpenSearch }: { onOpenNav: () => void; onO
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <span
-          title="Ingestion runs through the simulation adapter until the local worker (TBD-09) and an authorized sample (TBD-03) exist. Imports from disk use real validation."
-          className="hidden h-7 items-center gap-1.5 rounded-full border border-accent/25 bg-accent/10 px-2.5 text-[11.5px] font-semibold text-accent xl:inline-flex"
-        >
-          <FlaskConical size={13} /> Pilot · simulation adapter
-        </span>
         {offline && (
           <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-warn/30 bg-warn/10 px-2.5 text-[11.5px] font-semibold text-warn" role="status">
             <WifiOff size={13} /> Offline
@@ -100,7 +94,7 @@ export function Topbar({ onOpenNav, onOpenSearch }: { onOpenNav: () => void; onO
           {pending > 0 && <span className="text-fg-3">+{pending}</span>}
         </Link>
         <Button variant="primary" size="sm" icon={<Plus size={15} />} onClick={() => router.push("/ingest")} className="hidden sm:inline-flex">
-          New ingest
+          Import track
         </Button>
         <Menu
           header={

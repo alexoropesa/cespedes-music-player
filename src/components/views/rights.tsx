@@ -262,10 +262,10 @@ export function AuthorizationsView() {
                       <Menu
                         items={[
                           { label: "Edit record", icon: <Pencil size={15} />, onSelect: () => setTarget(a) },
-                          { label: "Approve", icon: <CircleCheck size={15} />, disabled: a.review === "approved", hint: "Already approved", onSelect: () => actions.updateAuthorization(a.id, { review: "approved" }) },
+                          { label: "Approve", icon: <CircleCheck size={15} />, disabled: a.review === "approved", hint: a.review === "approved" ? "Already approved" : undefined, onSelect: () => actions.updateAuthorization(a.id, { review: "approved" }) },
                           { label: "Copy code", icon: <Copy size={15} />, onSelect: () => copyText(a.code, "Code copied") },
                           { separator: true, label: "s" },
-                          { label: "Revoke…", icon: <Ban size={15} />, danger: true, disabled: a.review === "revoked", hint: "Already revoked", onSelect: () => setRevoke(a) },
+                          { label: "Revoke…", icon: <Ban size={15} />, danger: true, disabled: a.review === "revoked", hint: a.review === "revoked" ? "Already revoked" : undefined, onSelect: () => setRevoke(a) },
                         ]}
                         trigger={(p) => (
                           <IconButton label="Authorization actions" {...p}>

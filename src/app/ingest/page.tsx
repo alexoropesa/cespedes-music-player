@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { UrlIngestView } from "@/components/views/ingest/url";
-import { ViewSkeleton } from "@/components/ui/layout";
+import { ImportView } from "@/components/views/ingest/import";
 
-export const metadata: Metadata = { title: "Ingest from URL" };
+export const metadata: Metadata = { title: "Import track" };
 
 export default function Page() {
-  return (
-    <Suspense fallback={<ViewSkeleton />}>
-      <UrlIngestView />
-    </Suspense>
-  );
+  return <ImportView />;
 }

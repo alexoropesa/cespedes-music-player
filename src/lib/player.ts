@@ -208,11 +208,19 @@ export function toggleShuffle() {
   set({ shuffle: !ps.shuffle });
 }
 
+/** Removes a (deleted) track from the play queue; stops playback if it is the current one. */
 export function stopIfPlaying(trackId: string) {
-  if (ps.queue[ps.index] === trackId && audio) {
-    audio.pause();
-    audio.removeAttribute("src");
-    set({ queue: ps.queue.filter((x) => x !== trackId), index: -1, playing: false });
+  if (!ps.queue.includes(trackId)) return;
+  const current = ps.queue[ps.index];
+  const queue = ps.queue.filter((x) => x !== trackId);
+  if (current === trackId) {
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+    }
+    set({ queue, index: -1, playing: false });
+  } else {
+    set({ queue, index: current ? queue.indexOf(current) : -1 });
   }
 }
 

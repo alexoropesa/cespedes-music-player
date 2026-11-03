@@ -5,14 +5,12 @@ import { Database, Download, HardDrive, Lock, RotateCcw, ShieldCheck, Wifi, Wifi
 import { actions, getState, useStore } from "@/lib/store";
 import { toast } from "@/lib/toast";
 import { useIsOffline } from "@/lib/connectivity";
-import { ENGINE_INFO } from "@/lib/catalog";
-import type { EngineId, Settings } from "@/lib/types";
-import { ENGINES } from "@/lib/types";
-import { cx, downloadText, fmtBytes } from "@/lib/util";
+import type { Settings } from "@/lib/types";
+import { downloadText, fmtBytes } from "@/lib/util";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/badges";
-import { Field, Input, RadioCard, RangeInput, Segmented, Select, Switch } from "@/components/ui/form";
-import { Body, Card, Notice } from "@/components/ui/layout";
+import { Field, Input, Segmented, Switch } from "@/components/ui/form";
+import { Body, Card } from "@/components/ui/layout";
 import { ConfirmDialog } from "@/components/ui/overlay";
 
 function useDraft<T extends Partial<Settings>>(pick: (s: Settings) => T) {
@@ -59,21 +57,20 @@ function Row({ title, desc, children, locked }: { title: ReactNode; desc?: React
 }
 
 export function IngestionSettings() {
-  const d = useDraft((s) => ({ maxSizeMB: s.maxSizeMB, maxDurationMin: s.maxDurationMin, maxRetries: s.maxRetries, autoRetryTransient: s.autoRetryTransient, defaultEngine: s.defaultEngine }));
-  const stagingDir = useStore((s) => s.settings.stagingDir);
+  const d = useDraft((s) => ({ maxSizeMB: s.maxSizeMB, maxDurationMin: s.maxDurationMin, maxRetries: s.maxRetries, autoRetryTransient: s.autoRetryTransient }));
   return (
     <Body className="max-w-4xl">
       <Card title="Limits" description="Enforced per file. A job that goes over a limit ends as failed with the reason.">
-        <Row title="Maximum file size" desc="Downloads are aborted when they reach this size; partial files are removed from staging.">
+        <Row title="Maximum file size" desc="Larger files are rejected before import and fail validation if queued; the staged copy is removed.">
           <Input type="number" min={1} max={2000} value={d.value.maxSizeMB} onChange={(e) => d.set({ maxSizeMB: Math.max(1, Number(e.target.value)) })} suffix="MB" className="w-36" aria-label="Maximum file size in MB" />
         </Row>
-        <Row title="Maximum duration" desc="Sources longer than this can't be queued; imported files longer than this fail validation.">
+        <Row title="Maximum duration" desc="Measured after a full decode; longer files fail validation and are not added to the library.">
           <Input type="number" min={1} max={180} value={d.value.maxDurationMin} onChange={(e) => d.set({ maxDurationMin: Math.max(1, Number(e.target.value)) })} suffix="min" className="w-36" aria-label="Maximum duration in minutes" />
         </Row>
-        <Row title="Maximum retries" desc="Configurable up to 3. Never unlimited. Policy failures (limits, duplicates, access required) are not retried.">
+        <Row title="Maximum retries" desc="Configurable up to 3. Never unlimited. Policy failures (limits, duplicates, undecodable files) are not retried.">
           <Segmented label="Maximum retries" value={d.value.maxRetries} onChange={(v) => d.set({ maxRetries: v })} options={[0, 1, 2, 3].map((n) => ({ value: n, label: String(n) }))} />
         </Row>
-        <Row title="Automatic retry for transient errors" desc="Network resets and incomplete downloads retry with exponential backoff, within the maximum above.">
+        <Row title="Automatic retry for transient errors" desc="Interrupted jobs (e.g. the tab closed mid-validation) retry with exponential backoff, within the maximum above.">
           <Switch checked={d.value.autoRetryTransient} onChange={(v) => d.set({ autoRetryTransient: v })} label="Automatic retry" />
         </Row>
       </Card>
@@ -81,20 +78,11 @@ export function IngestionSettings() {
         <Row title="Concurrency" desc="The pilot processes one task at a time." locked="Pilot constraint (RF-ING-05)">
           <Pill>1 job</Pill>
         </Row>
-        <Row title="Staging folder" desc="Isolated sandbox. Only complete, validated files move to the library." locked="Defined by the worker sandbox">
-          <code className="rounded-md bg-surface-1 px-2 py-1 font-mono text-[12.5px]">{stagingDir}</code>
+        <Row title="Staging" desc="Each file is staged in this browser's storage (IndexedDB) under its job. Only complete, validated files reach the library." locked="Local browser storage">
+          <Pill>IndexedDB · this device</Pill>
         </Row>
-        <Row title="Authorization before download" desc="A job can't be created without an authorization basis." locked="Compliance requirement (RF-ING-02)">
+        <Row title="Authorization before download" desc="An import can't be queued without an authorization basis." locked="Compliance requirement (RF-ING-02)">
           <Switch checked onChange={() => undefined} disabled label="Require authorization" />
-        </Row>
-        <Row title="Default engine" desc="Preselected in URL ingest. The engine is swappable per job for comparisons.">
-          <Select value={d.value.defaultEngine} onChange={(e) => d.set({ defaultEngine: e.target.value as EngineId })} className="w-44" aria-label="Default engine">
-            {ENGINES.map((e) => (
-              <option key={e} value={e}>
-                {ENGINE_INFO[e].name}
-              </option>
-            ))}
-          </Select>
         </Row>
       </Card>
       <SaveBar
@@ -110,109 +98,42 @@ export function IngestionSettings() {
   );
 }
 
-export function EngineSettings() {
-  const d = useDraft((s) => ({ engines: s.engines }));
-  return (
-    <Body className="max-w-5xl">
-      <Notice className="mb-5">Engines run in an isolated environment with pinned versions; the system Python is never replaced. yt-dlp needs Python 3.11+; FreyrJS runs on Node.js. Dependency licenses are inventoried before packaging.</Notice>
-      <div className="grid gap-4 lg:grid-cols-3">
-        {ENGINES.map((e) => {
-          const info = ENGINE_INFO[e];
-          const v = d.value.engines[e];
-          return (
-            <section key={e} className={cx("rounded-[14px] border bg-surface-2/70 p-5", v.enabled ? "border-line" : "border-line opacity-70")}>
-              <div className="flex items-center justify-between">
-                <h3 className="text-[16px] font-extrabold">{info.name}</h3>
-                <Switch checked={v.enabled} onChange={(on) => d.set({ engines: { ...d.value.engines, [e]: { ...v, enabled: on } } })} label={`Enable ${info.name}`} />
-              </div>
-              <Field label="Pinned version" className="mt-4">
-                <Input value={v.version} onChange={(ev) => d.set({ engines: { ...d.value.engines, [e]: { ...v, version: ev.target.value } } })} className="font-mono" />
-              </Field>
-              <dl className="mt-4 space-y-2 text-[12.5px]">
-                {[
-                  ["Runtime", info.runtime],
-                  ["Input", info.input],
-                  ["Upstream", info.upstream],
-                  ["License", info.license],
-                ].map(([k, val]) => (
-                  <div key={k}>
-                    <dt className="text-fg-3">{k}</dt>
-                    <dd className="text-fg-2">{val}</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-4 rounded-lg bg-white/[0.04] px-3 py-2 text-[12px] leading-relaxed text-fg-2">{info.notes}</p>
-            </section>
-          );
-        })}
-      </div>
-      <SaveBar
-        dirty={d.dirty}
-        onDiscard={d.reset}
-        onSave={() => {
-          actions.updateSettings(d.value, "engine versions");
-          d.reset();
-          toast({ tone: "success", title: "Engine settings saved" });
-        }}
-      />
-    </Body>
-  );
-}
-
 export function ValidationSettings() {
-  const d = useDraft((s) => ({ durationToleranceSec: s.durationToleranceSec, conversionPolicy: s.conversionPolicy, normalizeDerivative: s.normalizeDerivative, libraryDir: s.libraryDir }));
   return (
     <Body className="max-w-4xl">
-      <Card title="Validation">
-        <Row title="Hash algorithm" desc="Computed over the original bytes to detect duplicates." locked="RF-04">
+      <Card title="Validation" description="Runs on every import, in this order. Any failure stops the job and nothing reaches the library.">
+        <Row title="Complete file" desc="The browser's audio decoder must read the stream end to end; truncated or corrupt files fail." locked="RF-04">
+          <Pill>Full decode</Pill>
+        </Row>
+        <Row title="Real codec detection" desc="Codec, container, sample rate and channels are read from the file header, never from the extension. A mismatching extension is a warning and the real codec is recorded." locked="RF-PRO-01">
+          <Pill>Header parser</Pill>
+        </Row>
+        <Row title="Duration" desc="Measured from the decoded audio and checked against the maximum in Settings › Ingestion." locked="RF-ING-06">
+          <Pill>Decoded length</Pill>
+        </Row>
+        <Row title="Hash algorithm" desc="Computed over the original bytes with Web Crypto." locked="RF-04">
           <Pill>SHA-256</Pill>
         </Row>
-        <Row title="Real codec detection" desc="Codec, container, bitrate and sample rate are read from the stream (ffprobe), never from the extension." locked="RF-PRO-01">
-          <Pill>ffprobe</Pill>
-        </Row>
-        <Row
-          title="Duration tolerance"
-          desc={
-            <>
-              Maximum difference between the downloaded file and the source / reference before a match is flagged. Pending agreement with the client <span className="font-mono">(TBD-10)</span>.
-            </>
-          }
-        >
-          <div className="flex w-56 items-center gap-3">
-            <RangeInput label="Duration tolerance" value={d.value.durationToleranceSec} min={0} max={10} onChange={(v) => d.set({ durationToleranceSec: v })} />
-            <span className="w-12 text-right font-mono text-[13px]">±{d.value.durationToleranceSec}s</span>
-          </div>
+        <Row title="Duplicates" desc="A file with the same SHA-256 as one already in the library fails and is logged under Library › Duplicates." locked="RF-BIB-04">
+          <Pill>By hash</Pill>
         </Row>
       </Card>
       <Card title="Processing policy" className="mt-5" description="Fidelity and loudness are different properties. Re-encoding never improves quality.">
-        <div className="grid gap-2 py-4 sm:grid-cols-2" role="radiogroup" aria-label="Conversion policy">
-          <RadioCard checked={d.value.conversionPolicy === "if-unplayable"} onChange={() => d.set({ conversionPolicy: "if-unplayable" })} title="Derive only if not playable" description="Default. Keep the original as is; create a compatible copy only when this system can't play it." />
-          <RadioCard checked={d.value.conversionPolicy === "never"} onChange={() => d.set({ conversionPolicy: "never" })} title="Never convert" description="Unplayable originals stay in the library, flagged for manual handling." />
-        </div>
-        <Row title="Optional loudness normalization" desc="Creates a normalized derivative on demand. The original is never modified.">
-          <Switch checked={d.value.normalizeDerivative} onChange={(v) => d.set({ normalizeDerivative: v })} label="Allow normalization derivatives" />
+        <Row title="Conversion" desc="The original is stored exactly as received. Only files this browser can decode are accepted, so no compatible copy is needed." locked="RF-PRO-03">
+          <Pill>No conversion</Pill>
         </Row>
-        <Row title="Keep originals" desc="Originals are never deleted automatically after creating derivatives." locked="RF-BIB-02 / RF-BIB-06">
+        <Row title="Keep originals" desc="Originals are never modified or deleted automatically; deleting a track always needs confirmation." locked="RF-BIB-02 / RF-BIB-06">
           <Switch checked onChange={() => undefined} disabled label="Keep originals" />
         </Row>
-        <Row title="Quality labels" desc="FLAC/WAV containers or high nominal bitrates from third-party sources are never presented as masters." locked="RF-PRO-05">
+        <Row title="Quality labels" desc="A FLAC/WAV container or a high nominal bitrate is never presented as a master — the real codec is what gets recorded." locked="RF-PRO-05">
           <Pill>Real codec only</Pill>
         </Row>
       </Card>
       <Card title="Storage" className="mt-5">
-        <Row title="Library root" desc="Originals in /originals, derivatives in /derivatives, each linked to its original.">
-          <Input value={d.value.libraryDir} onChange={(e) => d.set({ libraryDir: e.target.value })} className="w-60 font-mono" aria-label="Library root" />
+        <Row title="Library storage" desc="Originals are kept as real bytes in this browser's IndexedDB, available offline. Usage and the persistence request are in Settings › Workspace." locked="Local browser storage">
+          <Pill>IndexedDB · this device</Pill>
         </Row>
       </Card>
-      <SaveBar
-        dirty={d.dirty}
-        onDiscard={d.reset}
-        onSave={() => {
-          actions.updateSettings(d.value, "validation & storage");
-          d.reset();
-          toast({ tone: "success", title: "Validation settings saved" });
-        }}
-      />
     </Body>
   );
 }
@@ -265,7 +186,7 @@ export function WorkspaceSettings() {
             {sw === "active" ? "Active" : sw === "unsupported" ? "Unsupported" : "Not active (dev)"}
           </Pill>
         </Row>
-        <Row title="Browser storage" desc={`${realFiles.length} imported file(s) stored as real bytes; demo tracks use synthesized previews.`}>
+        <Row title="Browser storage" desc={`${realFiles.length} imported file(s) stored as real bytes on this device.`}>
           <div className="text-right">
             <div className="font-mono text-[13px]">
               {fmtBytes(est?.usage)} <span className="text-fg-3">/ {fmtBytes(est?.quota)}</span>
@@ -300,7 +221,7 @@ export function WorkspaceSettings() {
             Export JSON
           </Button>
         </Row>
-        <Row title="Reset demo workspace" desc="Clears local records and stored audio and restores the seeded pilot data. Cannot be undone.">
+        <Row title="Reset workspace" desc="Clears every local record (tracks, playlists, authorizations, jobs, audit) and the stored audio, leaving an empty workspace. Cannot be undone.">
           <Button variant="danger" icon={<RotateCcw size={15} />} onClick={() => setReset(true)}>
             Reset…
           </Button>
@@ -321,8 +242,8 @@ export function WorkspaceSettings() {
       <ConfirmDialog
         open={reset}
         onClose={() => setReset(false)}
-        title="Reset the demo workspace?"
-        description="All local records, imported audio and the audit trail on this device are replaced with the seeded pilot data."
+        title="Reset the workspace?"
+        description="All local records, imported audio and the audit trail on this device are deleted. The workspace starts empty."
         confirmLabel="Reset workspace"
         requireText="RESET"
         onConfirm={() => {

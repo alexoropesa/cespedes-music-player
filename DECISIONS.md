@@ -151,7 +151,7 @@ No se añadieron estados nuevos. Lo demás se expresa así:
 
 ---
 
-## 8. Diseño (Dark Premium) y referencias Mobbin
+## 8. Diseño (Dark Premium)
 
 **D-27 · Solo tema oscuro.**
 → No hay selector de tema. Los tokens están en `src/app/globals.css`: lienzo casi negro, superficies grafito por capas y CTA en píldora blanca. El acento es **iris** (#B19CFF) porque los colores de estado los fija el encargo (gris, azul, amarillo, verde, rojo) y un acento dorado o verde se confundiría con *validating* o *ready*. Tipografía: Figtree para la interfaz y Geist Mono para hashes, rutas y versiones.
@@ -161,22 +161,21 @@ No se añadieron estados nuevos. Lo demás se expresa así:
 
 ---
 
-## 9. Cómo probar cada ruta del piloto
+## 9. Arranque limpio y cómo probar
 
-En *Ingest › From URL › Authorized pilot samples* cada muestra recorre un camino distinto:
-- **Paper Satellites:** camino limpio hasta *ready*.
-- **Session 01:** contenido propio sin pérdida.
-- **Wren:** la extensión no coincide con el codec real.
-- **Midnight Ferry:** archivo incompleto que se recupera con un reintento acotado.
-- **Low Orbit:** errores de red transitorios.
-- **Glasshouse:** duplicado.
-- **Aurora I:** supera el límite de tamaño.
-- **Live Room Jam:** supera el límite de duración.
-- **Westbound:** exige inicio de sesión; se registra la limitación.
+**D-29 · Sin datos de demostración (sustituye a D-02, D-03 y a las muestras del piloto).**
+→ La app arranca con el espacio de trabajo **vacío**: sin artistas, pistas, autorizaciones, tareas, playlists, referencias ni auditoría precargadas. Todo lo que hay en la biblioteca viene de archivos importados por el operador. *Settings › Workspace › Reset* deja el espacio vacío otra vez. Un estado guardado con un formato anterior (la demo) se descarta al cargar, junto con su audio en IndexedDB.
+→ Se retiran de la interfaz las rutas que solo funcionaban con el adaptador de simulación: *From URL*, *Text search*, *Match review* y *Engine benchmark*. Las URL antiguas redirigen a *Import track* o al *Overview*. El código del adaptador queda en `src/lib/catalog.ts` y `src/lib/engine.ts` hasta que exista el worker real.
+→ Criterio: el cliente prueba solo funcionamiento real; nada simulado se presenta como si lo fuera.
 
-Para probar la validación real, sube cualquier audio en *Import from disk*. Si subes el mismo archivo dos veces, la segunda falla como duplicado por SHA-256. *Settings › Workspace › Reset* restaura los datos de demostración.
+**D-30 · Solo controles que hacen algo real.**
+→ Se retiran *Settings › Engines*, el motor por defecto, la tolerancia de duración, la política de conversión y la normalización opcional: ninguno actuaba sobre la importación local. Desaparece el botón *Normalize (derivative)*, que creaba un derivado con un hash inventado, y la pestaña *Library › References*, que nada podía llenar. Las métricas por tarea son solo las medidas en el equipo (tiempo de lectura de staging, tiempo de validación, disco); se quitan CPU y memoria, que eran estimadas. El progreso de *downloading* es la fracción real de bytes leídos del staging, sin esperas artificiales. Staging y biblioteca se muestran como lo que son: IndexedDB en este navegador.
+→ Al borrar una pista también sale de la cola del reproductor y su tarea deja de enlazarla (queda una nota en el log de la tarea); las playlists y los duplicados ya la soltaban.
+→ Criterio: D-29 aplicado a toda la interfaz; las pestañas comparten un único estado y una acción en una se refleja en las demás.
 
-## 10. Pendiente para sustituir la simulación
+**Cómo probar:** en *Import track* sube cualquier audio (FLAC, WAV, MP3, M4A/AAC, Opus/Ogg, WebM). Sin registros previos, el formulario abre directamente *Record new authorization*. La tarea pasa por *pending → downloading (copia a staging) → validating → ready*: decodificación completa, codec real de la cabecera, duración, SHA-256 y duplicados. Si subes el mismo archivo dos veces, la segunda falla como duplicado por SHA-256.
+
+## 10. Pendiente para activar la ingesta por URL, búsqueda y benchmark
 
 1. Muestra autorizada (TBD-03) y SO/recursos de la PC (TBD-01).
 2. Worker local aislado con versiones fijadas (Python 3.11+ para yt-dlp, Node para FreyrJS, FFmpeg/ffprobe), detrás de la interfaz de `engine.ts`. Proceso interno o microservicio: TBD-09.

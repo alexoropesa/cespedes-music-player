@@ -118,7 +118,7 @@ export function useJobActions(job: IngestJob) {
       icon: <Ban size={15} />,
       danger: true,
       disabled: job.status === "ready" || job.status === "failed",
-      hint: "Already finished",
+      hint: job.status === "ready" || job.status === "failed" ? "Already finished" : undefined,
       onSelect: () => setConfirmCancel(true),
     },
   ];
@@ -194,6 +194,7 @@ function JobDrawerInner({
 }) {
   const { items, confirm } = useJobActions(job);
   const router = useRouter();
+  const measuredSec = useStore((s) => s.files.find((f) => f.kind === "original" && f.trackId === job.trackId)?.durationSec);
   const artist = artists.find((a) => a.id === job.identity.artistId);
   const auth = auths.find((a) => a.id === job.authorizationId);
   const fmt = job.source.formats.find((f) => f.id === job.formatId);
@@ -287,7 +288,7 @@ function JobDrawerInner({
                     { k: "Platform", v: job.source.platform },
                     { k: "Source title", v: job.source.title },
                     { k: "Channel / uploader", v: <span>{job.source.channel} <span className="text-fg-3">· not a confirmed artist</span></span> },
-                    { k: "Source duration", v: fmtDuration(job.source.durationSec) },
+                    { k: job.mode === "local-file" ? "Measured duration" : "Source duration", v: job.mode === "local-file" ? (measuredSec != null ? fmtDuration(measuredSec, true) : "—") : fmtDuration(job.source.durationSec) },
                     { k: "Format", v: fmt ? <span className="inline-flex items-center gap-2"><CodecBadge codec={fmt.codec} kbps={fmt.abrKbps} /> {fmt.container.toUpperCase()} · {(fmt.asrHz / 1000).toFixed(1)} kHz · ≈ {fmtBytes(fmt.sizeBytes)}</span> : "—" },
                   ]}
                 />
@@ -319,11 +320,10 @@ function JobDrawerInner({
                 <h4 className="mb-2 text-[12px] font-semibold text-fg-3">Sandbox & limits (snapshot at creation)</h4>
                 <KV
                   items={[
-                    { k: "Staging folder", v: `/tmp/staging/${job.id}`, mono: true },
+                    { k: "Staging", v: `IndexedDB · ${job.blobKey ?? job.id}`, mono: true },
                     { k: "Concurrency", v: "1 job at a time" },
                     { k: "Max size", v: `${job.limits.maxSizeMB} MB` },
                     { k: "Max duration", v: `${job.limits.maxDurationMin} min` },
-                    { k: "Duration tolerance", v: `±${job.limits.toleranceSec} s` },
                     { k: "Retries", v: `${job.retries} of ${job.maxRetries} used` },
                   ]}
                 />
@@ -334,17 +334,15 @@ function JobDrawerInner({
             <>
               <ChecksList job={job} />
               <p className="text-[12px] leading-relaxed text-fg-3">
-                Only a complete, validated file leaves staging. The original is always retained; codec is read from the stream (ffprobe), never from the extension. {fmt && fmt.abrKbps > 0 && `Requested format: ${codecLabel(fmt.codec)} ${fmt.abrKbps} kbps.`}
+                Only a complete, validated file leaves staging. The original is always retained; codec is read from the file header, never from the extension. {fmt && fmt.abrKbps > 0 && `Requested format: ${codecLabel(fmt.codec)} ${fmt.abrKbps} kbps.`}
               </p>
             </>
           )}
           {tab === "Metrics" && (
             <div className="grid grid-cols-2 gap-3">
               {[
-                ["Download time", fmtMs(job.metrics.downloadMs)],
-                ["Processing time", fmtMs(job.metrics.processMs)],
-                ["Peak CPU", job.metrics.cpuPeakPct != null ? `${job.metrics.cpuPeakPct}%` : "—"],
-                ["Peak memory", job.metrics.memPeakMB != null ? `${job.metrics.memPeakMB} MB` : "—"],
+                ["Staging time", fmtMs(job.metrics.downloadMs)],
+                ["Validation time", fmtMs(job.metrics.processMs)],
                 ["Disk used", job.metrics.diskMB != null ? `${job.metrics.diskMB} MB` : "—"],
                 ["Attempts", `${job.retries + 1}`],
               ].map(([k, v]) => (
@@ -353,7 +351,7 @@ function JobDrawerInner({
                   <div className="mt-1.5 font-mono text-[18px] font-semibold tabular-nums">{v}</div>
                 </div>
               ))}
-              <p className="col-span-2 text-[12px] text-fg-3">Measured per job for the pilot report (RNF-REN-01). Thresholds are agreed with the client after the pilot.</p>
+              <p className="col-span-2 text-[12px] text-fg-3">Measured on this device for every job (RNF-REN-01). Thresholds are agreed with the client after the pilot.</p>
             </div>
           )}
           {tab === "Log" && (

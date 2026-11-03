@@ -210,7 +210,7 @@ export function QueueView() {
           </tbody>
         </Table>
       ) : (
-        <EmptyState icon={<Inbox size={22} />} title="No jobs match" description="Change the state filter or search, or start a new ingest." action={<ButtonLink href="/ingest" variant="primary">New ingest</ButtonLink>} />
+        <EmptyState icon={<Inbox size={22} />} title="No jobs match" description="Change the state filter or search, or import a track." action={<ButtonLink href="/ingest" variant="primary">Import track</ButtonLink>} />
       )}
       <JobDrawer jobId={openJob} onClose={() => setParam("job", null)} />
     </Body>
@@ -221,6 +221,7 @@ export function QueueView() {
 
 export function WorkerView() {
   const jobs = useStore((s) => s.jobs);
+  const tracks = useStore((s) => s.tracks);
   const settings = useStore((s) => s.settings);
   const paused = useStore((s) => s.queuePaused);
   const now = useNow();
@@ -243,20 +244,20 @@ export function WorkerView() {
     <Body className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Worker" value={paused ? "Paused" : active ? "Running" : "Idle"} hint={active ? `${active.code} · ${active.status}` : "Concurrency 1"} icon={<Cpu size={16} />} />
-        <Stat label="Avg download" value={fmtMs(avg("downloadMs"))} hint={`${measured.length} measured jobs`} icon={<Timer size={16} />} />
-        <Stat label="Avg processing" value={fmtMs(avg("processMs"))} hint="Validation in sandbox" icon={<Timer size={16} />} />
-        <Stat label="Avg disk / job" value={avg("diskMB") != null ? `${avg("diskMB")!.toFixed(1)} MB` : "—"} hint={`Peak CPU avg ${avg("cpuPeakPct")?.toFixed(0) ?? "—"}%`} icon={<HardDrive size={16} />} />
+        <Stat label="Avg staging" value={fmtMs(avg("downloadMs"))} hint={`${measured.length} measured jobs`} icon={<Timer size={16} />} />
+        <Stat label="Avg validation" value={fmtMs(avg("processMs"))} hint="Decode, codec, hash, duplicates" icon={<Timer size={16} />} />
+        <Stat label="Avg disk / job" value={avg("diskMB") != null ? `${avg("diskMB")!.toFixed(1)} MB` : "—"} hint="Original bytes stored" icon={<HardDrive size={16} />} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Isolated sandbox" description="Where downloads happen before anything reaches the library">
           <KV
             items={[
-              { k: "Staging folder", v: `${settings.stagingDir}/<job-id>`, mono: true },
-              { k: "Library root", v: `${settings.libraryDir}/originals`, mono: true },
+              { k: "Staging", v: "IndexedDB · one staged blob per job", mono: true },
+              { k: "Library", v: "IndexedDB · original bytes as received", mono: true },
               { k: "Concurrency", v: <span className="inline-flex items-center gap-2">1 job at a time <Pill icon={<Lock size={10} />}>Pilot rule</Pill></span> },
-              { k: "Writes", v: "Only inside the job's staging folder" },
-              { k: "Execution", v: "Downloaded files are never executed" },
+              { k: "Writes", v: "Only the job's staged blob until it validates" },
+              { k: "Execution", v: "Imported files are never executed — only decoded as audio" },
               { k: "Accounts", v: "No cookies, personal sessions or paid content" },
               { k: "Publish rule", v: "Only complete, validated files leave staging" },
             ]}
@@ -313,17 +314,15 @@ export function WorkerView() {
         )}
       </Card>
 
-      <Card title="Per-job measurements" description="Download time, processing time, peak CPU and memory, disk — for the pilot report (RNF-REN-01)" padded={false}>
+      <Card title="Per-job measurements" description="Staging time, validation time and disk used, measured on this device (RNF-REN-01)" padded={false}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-[13px]">
+          <table className="w-full min-w-[520px] text-[13px]">
             <thead>
               <tr className="text-left text-[11.5px] text-fg-3">
                 <th className="px-5 py-2 font-semibold">Job</th>
                 <th className="px-5 py-2 font-semibold">Track</th>
-                <th className="px-5 py-2 text-right font-semibold">Download</th>
-                <th className="px-5 py-2 text-right font-semibold">Processing</th>
-                <th className="px-5 py-2 text-right font-semibold">CPU peak</th>
-                <th className="px-5 py-2 text-right font-semibold">Memory peak</th>
+                <th className="px-5 py-2 text-right font-semibold">Staging</th>
+                <th className="px-5 py-2 text-right font-semibold">Validation</th>
                 <th className="px-5 py-2 text-right font-semibold">Disk</th>
               </tr>
             </thead>
@@ -334,15 +333,13 @@ export function WorkerView() {
                   <td className="max-w-[240px] truncate px-5 py-2.5">{j.identity.title}</td>
                   <td className="px-5 py-2.5 text-right font-mono tabular-nums">{fmtMs(j.metrics.downloadMs)}</td>
                   <td className="px-5 py-2.5 text-right font-mono tabular-nums">{fmtMs(j.metrics.processMs)}</td>
-                  <td className="px-5 py-2.5 text-right font-mono tabular-nums">{j.metrics.cpuPeakPct != null ? `${j.metrics.cpuPeakPct}%` : "—"}</td>
-                  <td className="px-5 py-2.5 text-right font-mono tabular-nums">{j.metrics.memPeakMB != null ? `${j.metrics.memPeakMB} MB` : "—"}</td>
                   <td className="px-5 py-2.5 text-right font-mono tabular-nums">{j.metrics.diskMB != null ? `${j.metrics.diskMB} MB` : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="border-t border-line px-5 py-3 text-[12px] text-fg-3">Performance thresholds are agreed with the client from these measurements (TBD-11). Total library time: {fmtDuration(jobs.filter((j) => j.status === "ready").reduce((a, j) => a + j.source.durationSec, 0))}.</div>
+        <div className="border-t border-line px-5 py-3 text-[12px] text-fg-3">Performance thresholds are agreed with the client from these measurements (TBD-11). Total library time: {fmtDuration(tracks.reduce((a, t) => a + t.durationSec, 0))}.</div>
       </Card>
     </Body>
   );

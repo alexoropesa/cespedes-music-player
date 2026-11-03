@@ -117,7 +117,7 @@ function finalizeReady(s0: State, j: IngestJob, file: Omit<AudioFile, "id" | "tr
     finishedAt: now,
     trackId,
     metrics: { ...x.metrics, processMs: now - (x.phaseStartedAt ?? now) + (x.metrics.processMs ?? 0), diskMB: +(file.sizeBytes / 1048576).toFixed(1) },
-    events: [...x.events, { at: now, kind: "ready", message: `Validated · original stored at ${path}` }],
+    events: [...x.events, { at: now, kind: "ready", message: j.mode === "local-file" ? "Validated · original stored in the library (IndexedDB)" : `Validated · original stored at ${path}` }],
   }));
   s2 = pushAudit(s2, "ingest.job.ready", `${j.code} ready · ${track.code} “${track.title}” added to library`, "info", j.code, { sha256: file.sha256 });
   if (j.playlistId) {
@@ -297,6 +297,26 @@ function advanceSimulated(s: State, j: IngestJob, now: number): State {
 const running = new Set<string>();
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Reads a staged blob chunk by chunk, reporting the real fraction read (throttled). */
+async function readWithProgress(blob: Blob, onProgress: (p: number) => void): Promise<ArrayBuffer> {
+  const out = new Uint8Array(blob.size);
+  const reader = blob.stream().getReader();
+  let read = 0;
+  let last = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out.set(value, read);
+    read += value.byteLength;
+    const p = blob.size ? read / blob.size : 1;
+    if (p - last >= 0.05 || p === 1) {
+      last = p;
+      onProgress(p);
+    }
+  }
+  return out.buffer;
+}
+
 function stillActive(id: string) {
   const j = getState().jobs.find((x) => x.id === id);
   return !!j && (j.status === "downloading" || j.status === "validating") && !j.paused;
@@ -313,13 +333,8 @@ async function runLocal(jobId: string) {
       setState((s) => fail(s, s.jobs.find((x) => x.id === jobId)!, "INTERRUPTED", "Staged file not found (staging was cleared). Re-import the file.", Date.now(), false));
       return;
     }
-    // "downloading" = copying into staging; animate for visibility
-    for (let p = 0.2; p <= 1; p += 0.2) {
-      await wait(160);
-      if (!stillActive(jobId)) return;
-      setState((s) => updateJob(s, jobId, (x) => ({ ...x, progress: Math.min(1, p) })));
-    }
-    const buf = await blob.arrayBuffer();
+    // "downloading" = reading the staged bytes; progress is the real share read so far
+    const buf = await readWithProgress(blob, (p) => setState((s) => updateJob(s, jobId, (x) => ({ ...x, progress: p }))));
     if (!stillActive(jobId)) return;
     const limitBytes = job0.limits.maxSizeMB * 1024 * 1024;
     if (buf.byteLength > limitBytes) {
@@ -335,11 +350,11 @@ async function runLocal(jobId: string) {
         phaseStartedAt: Date.now(),
         metrics: { ...x.metrics, downloadMs: Math.round(tProc - t0) },
         checks: CHECK_ORDER.map((key, i) => ({ key, status: i === 0 ? "running" : "pending" })),
-        events: [...x.events, { at: Date.now(), kind: "validating", message: "Copied into staging · validating real bytes" }],
+        events: [...x.events, { at: Date.now(), kind: "validating", message: `Read ${(buf.byteLength / 1048576).toFixed(1)} MB from staging · validating real bytes` }],
       })),
     );
     const step = async (key: ValidationCheck["key"], patch: Partial<ValidationCheck>) => {
-      await wait(380);
+      await wait(0); // yield so each check renders as it resolves
       setState((s) =>
         updateJob(s, jobId, (x) => {
           const i = CHECK_ORDER.indexOf(key);
@@ -400,7 +415,7 @@ async function runLocal(jobId: string) {
     const procMs = Math.round(performance.now() - tProc);
     setState((s) => {
       const j = s.jobs.find((x) => x.id === jobId)!;
-      const withMetrics = updateJob(s, jobId, (x) => ({ ...x, metrics: { ...x.metrics, processMs: procMs, memPeakMB: Math.round((buf.byteLength * 2.2) / 1048576) + 40 } }));
+      const withMetrics = updateJob(s, jobId, (x) => ({ ...x, metrics: { ...x.metrics, processMs: procMs } }));
       return finalizeReady(
         withMetrics,
         { ...j, phaseStartedAt: Date.now() },
@@ -462,7 +477,7 @@ export function engineTick() {
               status: "downloading",
               startedAt: j.startedAt ?? now,
               phaseStartedAt: now - (j.progress > 0 && j.progress < 1 ? j.progress * dur : 0),
-              events: [...j.events, { at: now, kind: "downloading", message: `${j.mode === "local-file" ? "Copying into" : "Downloading into"} ${x.settings.stagingDir}/${j.id} (isolated · 1 concurrent job)` }],
+              events: [...j.events, { at: now, kind: "downloading", message: j.mode === "local-file" ? "Reading staged file from IndexedDB (1 concurrent job)" : `Downloading into ${x.settings.stagingDir}/${j.id} (isolated · 1 concurrent job)` }],
             })),
             "ingest.job.started",
             `${next.code} started · ${next.tool} ${next.toolVersion}`,

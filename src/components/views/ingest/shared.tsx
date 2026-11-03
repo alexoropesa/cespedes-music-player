@@ -107,7 +107,8 @@ export interface AuthValue {
 }
 
 export const emptyAuth = (basis: AuthBasis = "rights-holder"): AuthValue => ({
-  mode: "existing",
+  // With no usable record yet (fresh workspace), start on "record new".
+  mode: getState().authorizations.some((a) => isUsableStatus(authStatus(a, Date.now()))) ? "existing" : "new",
   authorizationId: "",
   draft: { basis, holder: "", scope: ["copy", "retain"], territory: "ES", validUntil: "", evidence: "", notes: "" },
   confirmed: false,

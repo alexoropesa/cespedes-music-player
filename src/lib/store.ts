@@ -7,7 +7,7 @@
  * left in downloading/validating are recovered to pending (RNF-FIA-01).
  */
 import { useSyncExternalStore } from "react";
-import { EMPTY_STATE, STATE_VERSION, CHECK_ORDER, seedState } from "./seed";
+import { EMPTY_STATE, STATE_VERSION, CHECK_ORDER, createWorkspace } from "./seed";
 import type {
   Artist,
   AuditEvent,
@@ -90,16 +90,21 @@ export function initStore() {
   if (hydrated) return;
   const now = Date.now();
   let loaded: State | null = null;
+  let stale = false;
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as State;
       if (parsed.version === STATE_VERSION) loaded = parsed;
+      else stale = true;
     }
   } catch {
     loaded = null;
   }
-  state = loaded ? recoverAfterRestart(loaded, now) : seedState(now, session.ip);
+  // An older workspace format (e.g. the former demo seed) is discarded with its
+  // stored audio, so records and bytes never drift apart.
+  if (stale) void idbClear();
+  state = loaded ? recoverAfterRestart(loaded, now) : createWorkspace(now);
   hydrated = true;
   emit();
   schedulePersist();
@@ -218,7 +223,7 @@ export const actions = {
       const auth = s.authorizations.find((a) => a.id === input.authorizationId);
       created = {
         id: `job_${n}`,
-        code: `ING-${n}`,
+        code: `ING-${String(n).padStart(4, "0")}`,
         mode: input.mode,
         tool: input.tool,
         toolVersion: input.toolVersion,
@@ -375,6 +380,8 @@ export const actions = {
           tracks: s.tracks.filter((x) => x.id !== id),
           files: s.files.filter((f) => f.trackId !== id),
           playlists: s.playlists.map((p) => (p.trackIds.includes(id) ? { ...p, trackIds: p.trackIds.filter((x) => x !== id), updatedAt: Date.now() } : p)),
+          // The job keeps its history but no longer points at a track that is gone.
+          jobs: s.jobs.map((j) => (j.trackId === id ? { ...j, trackId: undefined, events: [...j.events, { at: Date.now(), kind: "note" as const, message: `Track ${t.code} deleted from the library by operator` }] } : j)),
         },
         "library.track.deleted",
         `Deleted ${t.code} · ${t.title} (confirmed by operator; ${files.length} file(s))`,
@@ -588,7 +595,7 @@ export const actions = {
       /* ignore */
     }
     await idbClear();
-    const fresh = seedState(Date.now(), session.ip);
-    setState(() => pushAudit(fresh, "workspace.reset", "Demo workspace reset to seed data", "warning"));
+    const fresh = createWorkspace(Date.now());
+    setState(() => pushAudit(fresh, "workspace.reset", "Workspace reset — all records and stored audio cleared", "warning"));
   },
 };
