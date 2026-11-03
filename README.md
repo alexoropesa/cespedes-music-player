@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bitferalda — Back office (fase 1)
 
-## Getting Started
+Back office interno para la ingesta autorizada, validación, biblioteca, playlists y reproducción sin internet de pistas musicales (Prueba A del piloto). Interfaz en inglés y tema único *Dark Premium*.
 
-First, run the development server:
+Las decisiones de diseño y las ambigüedades resueltas están en [DECISIONS.md](DECISIONS.md). Los requisitos están en [`info/`](info/).
+
+## Ejecutar
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Producción, con el *service worker* para recargar sin conexión:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build && npm run start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Secciones
 
-## Learn More
+| Sección | Contenido |
+|---|---|
+| Overview | KPIs, tarea activa, motores, alertas de derechos, actividad |
+| Ingest | From URL (asistente en 4 pasos) · Text search (yt-dlp / spotDL / FreyrJS) · Match review · Import from disk (validación real) |
+| Queue monitor | Jobs (estados, pausa, cancelar, reintento acotado, detalle) · Worker & sandbox (métricas, fallos por herramienta) |
+| Library | Tracks · Artists · References · Duplicates |
+| Playlists | Rejilla y detalle (reordenar, añadir y editar) |
+| Engine benchmark | Comparison · Runs (CSV) · Sample set |
+| Rights & provenance | Authorizations · Provenance register (CSV) |
+| Audit log | Eventos con operador e IP, filtros y CSV |
+| Connections | Spotify / Apple Music (vía online, bloqueada en esta fase) |
+| Settings | Ingestion · Engines · Validation & storage · Workspace |
 
-To learn more about Next.js, take a look at the following resources:
+## Estructura
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/`: modelo (`types.ts`), store persistente (`store.ts`), worker de ingesta (`engine.ts`), adaptador de simulación (`catalog.ts`), validación real de audio (`audio-inspect.ts`), reproductor (`player.ts`).
+- `src/components/`: shell, primitivas de UI y vistas por sección.
+- `src/app/`: rutas (App Router, Cache Components).

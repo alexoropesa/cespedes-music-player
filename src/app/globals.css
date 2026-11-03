@@ -1,26 +1,197 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Dark Premium — the only theme of the back office.
+ * Near-black canvas, layered graphite surfaces, iris accent used sparingly.
+ * Status colors are fixed by the spec: pending gray, downloading blue,
+ * validating yellow, ready green, failed red.
+ */
+@theme {
+  --color-canvas: #050506;
+  --color-surface-1: #0e0e11;
+  --color-surface-2: #151519;
+  --color-surface-3: #1c1c21;
+  --color-surface-4: #25252b;
+  --color-surface-5: #2f2f36;
+  --color-line: rgb(255 255 255 / 0.065);
+  --color-line-strong: rgb(255 255 255 / 0.11);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-fg: #f4f4f6;
+  --color-fg-2: #a3a3ad;
+  --color-fg-3: #6c6c77;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --color-accent: #b19cff;
+  --color-accent-strong: #9277ff;
+  --color-accent-ink: #0d0819;
+
+  --color-st-pending: #a1a1aa;
+  --color-st-downloading: #60a5fa;
+  --color-st-validating: #facc15;
+  --color-st-ready: #4ade80;
+  --color-st-failed: #f87171;
+  --color-warn: #fbbf24;
+
+  --radius-panel: 14px;
+
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  --animate-slide-in: slide-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  --animate-toast-in: toast-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-eq: eq 900ms ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in {
+    from { transform: translateX(24px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  @keyframes toast-in {
+    from { transform: translateY(10px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  @keyframes shimmer {
+    from { background-position: -200px 0; }
+    to { background-position: 200px 0; }
+  }
+  @keyframes eq {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
   }
 }
 
+@theme inline {
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+/* Quiet scrollbars that match the graphite surfaces */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-surface-5) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-surface-5);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Range inputs (seek / volume / settings sliders) */
+input[type="range"].range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+  --pct: 0%;
+}
+input[type="range"].range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--fill, var(--color-fg)) 0 var(--pct),
+    var(--color-surface-5) var(--pct) 100%
+  );
+}
+input[type="range"].range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-surface-5);
+}
+input[type="range"].range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--fill, var(--color-fg));
+}
+input[type="range"].range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: var(--color-fg);
+  opacity: 0;
+  transition: opacity 120ms;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
+}
+input[type="range"].range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fg);
+}
+input[type="range"].range:hover::-webkit-slider-thumb,
+input[type="range"].range:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+input[type="range"].range:hover {
+  --fill: var(--color-accent);
+}
+input[type="range"].range.range-always::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-3) 0px,
+    var(--color-surface-4) 80px,
+    var(--color-surface-3) 160px
+  );
+  background-size: 400px 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* Section tint at the top of the main panel (Spotify-style color wash) */
+.panel-wash {
+  background:
+    radial-gradient(1100px 280px at 0% -40px, color-mix(in oklab, var(--wash, var(--color-accent)) 16%, transparent), transparent 70%),
+    var(--color-surface-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
