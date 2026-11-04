@@ -142,9 +142,8 @@ No se añadieron estados nuevos. Lo demás se expresa así:
 ## 7. Conexiones online y alcance excluido
 
 **D-25 · Spotify y Apple Music.**
-→ Se incluyen como pestaña porque la SRS pide la sección *Connections* (RI-UI-02), pero **bloqueadas**: falta el acceso de desarrollador (TBD-04) y la decisión sobre Apple Music (TBD-05).
-→ La pestaña muestra los botones *Connect* y *Disconnect*, el aviso de alcance RI-UI-08 tal cual y los permisos mínimos. No hay ningún formulario de contraseña. Cada intento de conexión queda en auditoría.
-→ Criterio: separar la vía online de la local sin fingir una integración que aún no existe.
+→ Sin pestaña *Connections*: se retiró porque solo mostraba una integración bloqueada (TBD-04, TBD-05) sin función real.
+→ Si se desbloquea el acceso de desarrollador, la vía online vuelve como sección propia, separada de la biblioteca local.
 
 **D-26 · Fuera de esta fase.**
 → Calendario y timeline (diferidos en la SRS), anuncios y TikTok, compras, cookies o cuentas personales, contenido de pago, DRM y descarga de playlists enteras. El *Overview* lo recuerda en una línea.

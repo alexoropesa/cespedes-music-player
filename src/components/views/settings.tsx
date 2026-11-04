@@ -199,7 +199,7 @@ export function WorkspaceSettings() {
         </div>
       </Card>
       <Card title="Offline & storage" className="mt-5" description="Local playback works without internet: audio lives on this device.">
-        <Row title="Connectivity" desc="Library playback never needs the network; ingestion and online providers do.">
+        <Row title="Connectivity" desc="Library playback never needs the network; ingestion does.">
           <Pill tone={offline ? "warning" : "success"} icon={offline ? <WifiOff size={11} /> : <Wifi size={11} />}>
             {offline ? "Offline" : "Online"}
           </Pill>

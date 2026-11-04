@@ -41,7 +41,6 @@ export const EMPTY_STATE: State = {
   benchRuns: [],
   audit: [],
   duplicates: [],
-  connections: [],
   settings: DEFAULT_SETTINGS,
   queuePaused: false,
   counters: {},
@@ -89,10 +88,6 @@ export function createWorkspace(now: number): State {
   return {
     ...EMPTY_STATE,
     seededAt: now,
-    connections: [
-      { provider: "spotify", enabled: true, status: "blocked", note: "Developer Dashboard access with a Premium owner not verified yet (TBD-04)." },
-      { provider: "apple-music", enabled: false, status: "not-connected", note: "Optional Test C — activates only if the client decides to evaluate Apple Music (TBD-05)." },
-    ],
     settings: DEFAULT_SETTINGS,
   };
 }

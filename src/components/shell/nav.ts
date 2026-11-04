@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Library,
   ListMusic,
-  Plug,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -39,7 +38,6 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "System",
     items: [
-      { href: "/connections", label: "Connections", icon: Plug },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },

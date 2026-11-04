@@ -29,7 +29,6 @@ npm run build && npm run start
 | Engine benchmark | Comparison · Runs (CSV) · Sample set |
 | Rights & provenance | Authorizations · Provenance register (CSV) |
 | Audit log | Eventos con operador e IP, filtros y CSV |
-| Connections | Spotify / Apple Music (vía online, bloqueada en esta fase) |
 | Settings | Ingestion · Engines · Validation & storage · Workspace |
 
 ## Estructura

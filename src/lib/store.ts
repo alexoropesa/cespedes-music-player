@@ -105,10 +105,18 @@ export function initStore() {
   // An older workspace format (e.g. the former demo seed) is discarded with its
   // stored audio, so records and bytes never drift apart.
   if (stale) void idbClear();
-  state = loaded ? recoverAfterRestart(dropDiskImports(loaded), now) : createWorkspace(now);
+  state = loaded ? recoverAfterRestart(dropDiskImports(dropConnections(loaded)), now) : createWorkspace(now);
   hydrated = true;
   emit();
   schedulePersist();
+}
+
+/** The Connections tab was removed; a workspace saved before keeps no trace of it. */
+function dropConnections(s: State): State {
+  if (!("connections" in s)) return s;
+  const rest: State & { connections?: unknown } = { ...s };
+  delete rest.connections;
+  return rest;
 }
 
 /**
@@ -641,22 +649,9 @@ export const actions = {
     });
   },
 
-  /* ---------------- settings / connections / workspace ---------------- */
+  /* ---------------- settings / workspace ---------------- */
   updateSettings(patch: Partial<Settings>, label: string) {
     setState((s) => pushAudit({ ...s, settings: { ...s.settings, ...patch } }, "settings.updated", `Updated ${label}`, "info", undefined, Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : (v as string | number | boolean)]))));
-  },
-  setAppleMusicEvaluation(enabled: boolean) {
-    setState((s) =>
-      pushAudit(
-        { ...s, connections: s.connections.map((c) => (c.provider === "apple-music" ? { ...c, enabled } : c)) },
-        "connections.apple_music.evaluation",
-        enabled ? "Apple Music evaluation (Test C) enabled" : "Apple Music evaluation (Test C) disabled",
-        "info",
-      ),
-    );
-  },
-  logConnectionAttempt(provider: string) {
-    setState((s) => pushAudit(s, "connections.connect.blocked", `Connect ${provider} attempted — blocked: developer access pending`, "warning", provider));
   },
   logEvent(action: string, message: string, severity: AuditEvent["severity"] = "info", target?: string) {
     setState((s) => pushAudit(s, action, message, severity, target));

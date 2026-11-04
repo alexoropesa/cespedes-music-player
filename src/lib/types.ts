@@ -341,13 +341,6 @@ export interface DuplicateEvent {
   dismissed: boolean;
 }
 
-export interface ProviderConnection {
-  provider: "spotify" | "apple-music";
-  enabled: boolean;
-  status: "not-connected" | "blocked";
-  note: string;
-}
-
 export interface Settings {
   maxSizeMB: number;
   maxDurationMin: number;
@@ -378,7 +371,6 @@ export interface State {
   benchRuns: BenchRun[];
   audit: AuditEvent[];
   duplicates: DuplicateEvent[];
-  connections: ProviderConnection[];
   settings: Settings;
   queuePaused: boolean;
   counters: Record<string, number>;
