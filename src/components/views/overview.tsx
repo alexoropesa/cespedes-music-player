@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, ArrowRight, Link2, Ban, CircleCheck, CircleDashed, Clock, Database, FileUp, Library, ListMusic, Play, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Activity, ArrowRight, Link2, Ban, CircleCheck, CircleDashed, Clock, Database, Library, ListMusic, Play, ShieldAlert, TriangleAlert } from "lucide-react";
 import { actions, authStatus, isAwaitingReview, trackUsable, useStore } from "@/lib/store";
 import { useNow } from "@/lib/clock";
 import { playQueue, toggle, usePlayer } from "@/lib/player";
@@ -48,14 +48,11 @@ export function OverviewView() {
       <PageHeader
         eyebrow={`${greet}, ${operator.name.split(" ")[0]}`}
         title="Overview"
-        description="Local library: bring in authorized tracks from a URL or from disk, validate them for real, keep their provenance, build playlists and play offline."
+        description="Local library: bring in authorized tracks from a URL or a music folder, validate them for real, keep their provenance, build playlists and play offline."
         actions={
           <>
-            <Button variant="secondary" icon={<Link2 size={16} />} onClick={() => router.push("/ingest/url")}>
-              From URL
-            </Button>
-            <Button variant="primary" icon={<FileUp size={16} />} onClick={() => router.push("/ingest")}>
-              Import track
+            <Button variant="primary" icon={<Link2 size={16} />} onClick={() => router.push("/ingest")}>
+              Ingest from URL
             </Button>
           </>
         }
@@ -125,8 +122,8 @@ export function OverviewView() {
                   Resume queue
                 </Button>
               ) : (
-                <Button size="sm" variant="secondary" icon={<FileUp size={14} />} onClick={() => router.push("/ingest")}>
-                  Import track
+                <Button size="sm" variant="secondary" icon={<Link2 size={14} />} onClick={() => router.push("/ingest")}>
+                  Ingest from URL
                 </Button>
               )}
             </div>
@@ -163,12 +160,12 @@ export function OverviewView() {
           </SectionTitle>
           {!recent.length && (
             <EmptyState
-              icon={<FileUp size={22} />}
+              icon={<Link2 size={22} />}
               title="The library is empty"
-              description="Import an audio file to validate it and add it to the library."
+              description="Ingest an authorized track from a URL, or add a music folder, to validate it and add it to the library."
               action={
-                <Button variant="primary" icon={<FileUp size={16} />} onClick={() => router.push("/ingest")}>
-                  Import track
+                <Button variant="primary" icon={<Link2 size={16} />} onClick={() => router.push("/ingest")}>
+                  Ingest from URL
                 </Button>
               }
             />
@@ -261,10 +258,9 @@ export function OverviewView() {
         </div>
 
         <Card title="Quick actions" description="Every import records provenance and an authorization before it is stored">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { href: "/ingest/url", icon: <Link2 size={18} />, t: "Ingest from URL", d: "yt-dlp, spotDL, FreyrJS or Match on this PC" },
-              { href: "/ingest", icon: <FileUp size={18} />, t: "Import from disk", d: "Real decode, codec, duration and SHA-256 checks" },
+              { href: "/ingest", icon: <Link2 size={18} />, t: "Ingest from URL", d: "yt-dlp, spotDL, FreyrJS or Match on this PC" },
               { href: "/library", icon: <Library size={18} />, t: "Library", d: "Validated tracks with provenance" },
               { href: "/playlists", icon: <ListMusic size={18} />, t: "Playlists", d: "Only ready, usable tracks" },
               { href: "/queue", icon: queuePaused ? <Play size={18} /> : <Activity size={18} />, t: queuePaused ? "Resume queue" : "Queue monitor", d: "Pause, cancel or retry (bounded)" },

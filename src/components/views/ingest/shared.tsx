@@ -263,7 +263,7 @@ export function AuthorizationFields({ value: given, onChange }: { value: AuthVal
 export function PlaylistSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const playlists = useStore((s) => s.playlists);
   return (
-    <Field label="Also add to playlist" optional hint="Added only after the track reaches Ready. Whole playlists are never downloaded by default.">
+    <Field label="Also add to playlist" optional hint="Added only after the track reaches Ready.">
       <Select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Library only</option>
         {playlists.map((p) => (

@@ -1,4 +1,4 @@
-/* Minimal IndexedDB blob store: staging + library audio bytes (offline playback). */
+/* Minimal IndexedDB blob store for cover art (the audio lives on disk). The DB name predates that. */
 
 const DB = "bitferalda-audio";
 const STORE = "blobs";

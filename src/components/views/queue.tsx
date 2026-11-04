@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Inbox, Search, ShieldCheck, Lock, Timer, HardDrive, Cpu, RotateCcw, FolderLock } from "lucide-react";
-import { isAwaitingReview, useStore } from "@/lib/store";
+import { Ban, Inbox, Search, ShieldCheck, Lock, Timer, HardDrive, Cpu, RotateCcw, FolderLock } from "lucide-react";
+import { actions, isAwaitingReview, isCancellable, useStore } from "@/lib/store";
+import { toast } from "@/lib/toast";
 import { useNow } from "@/lib/clock";
 import { ENGINE_INFO } from "@/lib/catalog";
 import type { IngestJob, JobStatus } from "@/lib/types";
 import { JOB_STATUSES } from "@/lib/types";
 import { cx, fmtBytes, fmtDuration, fmtMs, fmtRelative } from "@/lib/util";
-import { ButtonLink } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { StatusBadge, STATUS_COLOR, Pill } from "@/components/ui/badges";
-import { Input, Select } from "@/components/ui/form";
+import { Checkbox, Input, Select } from "@/components/ui/form";
+import { ConfirmDialog } from "@/components/ui/overlay";
 import { Body, Card, Cover, EmptyState, KV, Notice, ProgressBar, Stat, TD, TH, TR, Table } from "@/components/ui/layout";
 import { CheckIcon, JobDrawer, JobRowMenu, JobStepper, jobNote, toolLabel } from "@/components/jobs";
 
@@ -27,6 +29,8 @@ export function QueueView() {
   const pathname = usePathname();
   const [q, setQ] = useState("");
   const [tool, setTool] = useState("all");
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
   const status = (params.get("status") as StatusFilter) || "all";
   const openJob = params.get("job");
 
@@ -47,6 +51,23 @@ export function QueueView() {
       const rank = (j: IngestJob) => (j.status === "downloading" || (j.status === "validating" && !isAwaitingReview(j)) ? 0 : j.status === "pending" ? 1 : isAwaitingReview(j) ? 2 : 3);
       return rank(a) - rank(b) || (rank(a) === 1 ? a.createdAt - b.createdAt : (b.finishedAt ?? b.createdAt) - (a.finishedAt ?? a.createdAt));
     });
+
+  // Selection only ever holds jobs that can still be cancelled and are visible with the current filters.
+  const cancellableRows = rows.filter(isCancellable);
+  const selected = cancellableRows.filter((j) => picked.has(j.id));
+  const allPicked = cancellableRows.length > 0 && selected.length === cancellableRows.length;
+  const togglePick = (id: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const cancelSelected = () => {
+    const n = actions.cancelJobs(selected.map((j) => j.id));
+    setPicked(new Set());
+    toast({ tone: "success", title: `${n} job${n === 1 ? "" : "s"} cancelled`, description: "They end as failed (Cancelled by operator) and can be retried later while retries remain." });
+  };
 
   return (
     <Body>
@@ -130,10 +151,32 @@ export function QueueView() {
         </div>
       </div>
 
+      {selected.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface-2/80 px-4 py-2.5 text-[13px]">
+          <span className="font-semibold">
+            {selected.length} job{selected.length === 1 ? "" : "s"} selected
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
+            Clear
+          </Button>
+          <Button size="sm" variant="danger" icon={<Ban size={14} />} className="ml-auto" onClick={() => setConfirmBulk(true)}>
+            Cancel selected
+          </Button>
+        </div>
+      )}
+
       {rows.length ? (
         <Table>
           <thead>
             <tr>
+              <TH className="w-10">
+                <Checkbox
+                  checked={allPicked}
+                  disabled={!cancellableRows.length}
+                  onChange={(on) => setPicked(on ? new Set(cancellableRows.map((j) => j.id)) : new Set())}
+                  label={<span className="sr-only">Select every job that can be cancelled</span>}
+                />
+              </TH>
               <TH>Job</TH>
               <TH>Track · source</TH>
               <TH>State</TH>
@@ -149,7 +192,12 @@ export function QueueView() {
               const artist = artists.find((a) => a.id === j.identity.artistId);
               const fmt = j.source.formats.find((f) => f.id === j.formatId);
               return (
-                <TR key={j.id} onClick={() => setParam("job", j.id)} selected={openJob === j.id}>
+                <TR key={j.id} onClick={() => setParam("job", j.id)} selected={openJob === j.id || picked.has(j.id)}>
+                  <TD>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      {isCancellable(j) && <Checkbox checked={picked.has(j.id)} onChange={(on) => togglePick(j.id, on)} label={<span className="sr-only">Select {j.code}</span>} />}
+                    </div>
+                  </TD>
                   <TD className="whitespace-nowrap">
                     <div className="font-mono text-[12.5px] font-semibold">{j.code}</div>
                     <div className="text-[11.5px] text-fg-3">{fmtRelative(j.createdAt, now)}</div>
@@ -211,9 +259,17 @@ export function QueueView() {
           </tbody>
         </Table>
       ) : (
-        <EmptyState icon={<Inbox size={22} />} title="No jobs match" description="Change the state filter or search, or import a track." action={<ButtonLink href="/ingest" variant="primary">Import track</ButtonLink>} />
+        <EmptyState icon={<Inbox size={22} />} title="No jobs match" description="Change the state filter or search, or add a track." action={<ButtonLink href="/ingest" variant="primary">Add track</ButtonLink>} />
       )}
       <JobDrawer jobId={openJob} onClose={() => setParam("job", null)} />
+      <ConfirmDialog
+        open={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        title={`Cancel ${selected.length} job${selected.length === 1 ? "" : "s"}?`}
+        description="Each one ends as failed (Cancelled by operator); a running download stops and its staging folder is cleaned. You can retry them later while retries remain."
+        confirmLabel="Cancel selected"
+        onConfirm={cancelSelected}
+      />
     </Body>
   );
 }
@@ -255,7 +311,7 @@ export function WorkerView() {
           <KV
             items={[
               { k: "Staging", v: ".worker/staging/<job> on this PC (URL downloads)", mono: true },
-              { k: "Library", v: "library/originals · your folders in place · IndexedDB for disk imports", mono: true },
+              { k: "Library", v: "library/originals · your folders in place", mono: true },
               { k: "Concurrency", v: <span className="inline-flex items-center gap-2">1 job at a time <Pill icon={<Lock size={10} />}>Pilot rule</Pill></span> },
               { k: "Writes", v: "Only the job's staged blob until it validates" },
               { k: "Execution", v: "Imported files are never executed — only decoded as audio" },

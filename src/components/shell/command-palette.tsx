@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CornerDownLeft, Disc3, FileUp, Link2, ListMusic, Plus, Search, Workflow } from "lucide-react";
+import { CornerDownLeft, Disc3, Link2, ListMusic, Plus, Search, Workflow } from "lucide-react";
 import { NAV_GROUPS } from "./nav";
 import { actions, useStore, trackUsable } from "@/lib/store";
 import { playQueue } from "@/lib/player";
@@ -44,8 +44,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const items = useMemo<Item[]>(() => {
     const go = (href: string) => () => router.push(href);
     const base: Item[] = [
-      { id: "a-url", group: "Actions", label: "Ingest from URL", sub: "yt-dlp · spotDL · FreyrJS · Match on this PC", icon: <Link2 size={16} />, run: go("/ingest/url") },
-      { id: "a-import", group: "Actions", label: "Import audio file from disk", sub: "Real validation: codec, decode, SHA-256", icon: <FileUp size={16} />, run: go("/ingest") },
+      { id: "a-url", group: "Actions", label: "Ingest from URL", sub: "yt-dlp · spotDL · FreyrJS · Match on this PC", icon: <Link2 size={16} />, run: go("/ingest") },
       {
         id: "a-pl",
         group: "Actions",

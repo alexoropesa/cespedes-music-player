@@ -94,7 +94,7 @@ export function Topbar({ onOpenNav, onOpenSearch }: { onOpenNav: () => void; onO
           {pending > 0 && <span className="text-fg-3">+{pending}</span>}
         </Link>
         <Button variant="primary" size="sm" icon={<Plus size={15} />} onClick={() => router.push("/ingest")} className="hidden sm:inline-flex">
-          Import track
+          Add track
         </Button>
         <Menu
           header={

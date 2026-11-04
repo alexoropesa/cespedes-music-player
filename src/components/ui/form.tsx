@@ -149,7 +149,9 @@ export function Chip({ active, onClick, children, count }: { active?: boolean; o
 
 export function Checkbox({ checked, onChange, label, description, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; description?: ReactNode; disabled?: boolean }) {
   return (
-    <label className={cx("flex cursor-pointer items-start gap-3", disabled && "cursor-not-allowed opacity-50")}>
+    // relative: keeps the visually hidden input inside its row — positioned against the page, a long list
+    // of them stretches the document and focusing one scrolls the whole app out of view.
+    <label className={cx("relative flex cursor-pointer items-start gap-3", disabled && "cursor-not-allowed opacity-50")}>
       <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span
         aria-hidden

@@ -10,7 +10,6 @@ import { CommandPalette } from "./command-palette";
 import { Toaster } from "./toaster";
 import { initStore, session, useHydrated } from "@/lib/store";
 import { engineTick } from "@/lib/engine";
-import { backfillCovers } from "@/lib/covers";
 import { toggle } from "@/lib/player";
 import { ViewSkeleton } from "@/components/ui/layout";
 import { IconButton } from "@/components/ui/button";
@@ -28,7 +27,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Boot: load persisted workspace (or seed), learn the request IP for audit entries.
   useEffect(() => {
     initStore();
-    void backfillCovers();
     fetch("/api/whoami", { cache: "no-store" })
       .then((r) => r.json())
       .then((d: { ip?: string }) => {
@@ -79,7 +77,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </aside>
         <main
           id="main"
-          className="panel-wash min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-[var(--radius-panel)]"
+          // relative: absolutely positioned content stays inside this scroll area instead of stretching the page.
+          className="panel-wash relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-[var(--radius-panel)]"
           style={{ backgroundAttachment: "local" }}
         >
           {!hydrated && <ViewSkeleton />}

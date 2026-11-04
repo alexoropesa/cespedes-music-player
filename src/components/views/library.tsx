@@ -260,7 +260,7 @@ export function TracksView() {
           </tbody>
         </Table>
       ) : (
-        <EmptyState title="No tracks match" description="Adjust the filters, or import a track." action={<ButtonLink href="/ingest" variant="primary">Import track</ButtonLink>} />
+        <EmptyState title="No tracks match" description="Adjust the filters, or add a track." action={<ButtonLink href="/ingest" variant="primary">Add track</ButtonLink>} />
       )}
       <TrackDrawer trackId={openTrack} onClose={() => setTrackParam(null)} />
       <EditTrackModal track={editTrack} open={!!editTrack} onClose={() => setEditId(null)} />

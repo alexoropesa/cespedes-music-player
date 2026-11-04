@@ -76,7 +76,8 @@ export interface ProbeResult {
   durationSec: number;
 }
 
-export type WorkerFailureCode = "ACCESS_REQUIRED" | "NETWORK" | "SIZE_LIMIT" | "DECODE_ERROR" | "ENGINE_ERROR" | "CANCELLED" | "UNSUPPORTED";
+/** RATE_LIMITED: YouTube asked this PC to prove it is not a bot (too many requests). */
+export type WorkerFailureCode = "RATE_LIMITED" | "ACCESS_REQUIRED" | "NETWORK" | "SIZE_LIMIT" | "DECODE_ERROR" | "ENGINE_ERROR" | "CANCELLED" | "UNSUPPORTED";
 
 export interface WorkerJobState {
   key: string;
@@ -92,6 +93,8 @@ export interface WorkerJobState {
   processMs?: number;
   file?: { name: string; ext: string; sizeBytes: number; probe: ProbeResult; decode: { ok: boolean; errors: string }; sha256: string };
   hasCover?: boolean;
+  /** Match: the YouTube upload actually downloaded (picked at inspect time or when the job ran). */
+  matched?: { id: string; title: string; channel: string; quality?: MatchCandidate["quality"] };
   failure?: { code: WorkerFailureCode; message: string; retryable: boolean };
   log: string[];
 }
@@ -100,7 +103,41 @@ export interface CreateWorkerJob {
   key: string;
   engine: EngineId;
   url: string;
-  /** yt-dlp: format id. Match: the chosen candidate's YouTube video id. */
+  /**
+   * yt-dlp: format id. Match: "<YouTube video id>:<audio format id>" chosen at
+   * inspect time, or "auto" to pick the upload when the job runs (playlists).
+   */
   formatId?: string;
   maxSizeMB: number;
+  /** Match "auto": duration tolerance (s) the upload must meet, as the validator will check. */
+  toleranceSec?: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* collections (Match: playlists and albums)                           */
+/* ------------------------------------------------------------------ */
+
+export interface CollectionTrack {
+  /** Catalog song link — what each queued job reproduces. */
+  url: string;
+  title: string;
+  artists: string[];
+  album?: string;
+  durationSec: number;
+}
+
+export interface CollectionInfo {
+  provider: "spotify" | "apple-music";
+  kind: "playlist" | "album";
+  url: string;
+  name: string;
+  owner?: string;
+  coverUrl?: string;
+  tracks: CollectionTrack[];
+  /** The public page listed only part of the list (Spotify embed: 100 songs; Apple playlist page: its first songs). */
+  mayBeTruncated: boolean;
+}
+
+export type CollectionResponse =
+  | { ok: true; toolVersion: string; collection: CollectionInfo; warnings: string[] }
+  | { ok: false; code: InspectErrorCode; message: string };

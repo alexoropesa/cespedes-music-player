@@ -8,7 +8,7 @@ import { toast } from "@/lib/toast";
 import { codecLabel } from "@/lib/seed";
 import type { EngineId } from "@/lib/types";
 import { ENGINES } from "@/lib/types";
-import type { HealthResponse, InspectResponse, MatchFlag } from "@/lib/worker-types";
+import type { CollectionResponse, HealthResponse, InspectResponse, MatchFlag } from "@/lib/worker-types";
 import { cx, fmtBytes, fmtDuration, hostOf } from "@/lib/util";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { CodecBadge, Pill } from "@/components/ui/badges";
@@ -16,6 +16,7 @@ import { Input, Segmented } from "@/components/ui/form";
 import { Body, Card, Cover, KV, Notice, Skeleton } from "@/components/ui/layout";
 import { AuthorizationFields, IdentityFields, PlaylistSelect, authValid, commitAuthorization, commitIdentity, emptyAuth, emptyIdentity, identityValid, type AuthValue, type IdentityValue } from "./shared";
 import { BASIS_LABEL } from "@/components/tracks";
+import { CollectionIngest } from "./collection";
 
 const STEPS = ["Source", "Identity", "Authorization", "Review"] as const;
 const ENGINE_LABEL: Record<EngineId, string> = { "yt-dlp": "yt-dlp", spotdl: "spotDL", freyrjs: "FreyrJS", match: "Match" };
@@ -23,7 +24,7 @@ const ENGINE_INPUT: Record<EngineId, string> = {
   "yt-dlp": "Direct source URL (YouTube, SoundCloud, Bandcamp, Commons…)",
   spotdl: "Spotify track link — audio matched on YouTube Music",
   freyrjs: "Spotify, Apple Music or Deezer track link — matched on YouTube Music",
-  match: "Spotify track link — best-matching YouTube upload with the highest-quality audio, picked automatically (no Spotify credentials needed)",
+  match: "Spotify song, playlist or album, or Apple Music song or album — best-matching YouTube upload with the highest-quality audio, picked automatically (no credentials needed)",
 };
 const FLAG_TEXT: Record<MatchFlag, string> = {
   live: "Live",
@@ -45,8 +46,22 @@ function engineFor(url: string): EngineId | null {
   const h = hostOf(url);
   if (!h) return null;
   if (h === "open.spotify.com" || h === "spotify.link") return "match";
-  if (h === "music.apple.com" || h.endsWith("deezer.com")) return "freyrjs";
+  if (h === "music.apple.com") return "match";
+  if (h.endsWith("deezer.com")) return "freyrjs";
   return "yt-dlp";
+}
+
+/** Spotify playlist/album or Apple Music album/playlist: Match expands it into songs. */
+function isCollectionLink(url: string) {
+  try {
+    const u = new URL(url.trim());
+    const h = u.hostname.replace(/^www\./, "");
+    if (h === "open.spotify.com") return /\/(playlist|album)\//.test(u.pathname);
+    if (h === "music.apple.com") return /\/(album|playlist)\//.test(u.pathname) && !u.searchParams.has("i");
+  } catch {
+    // not a URL yet
+  }
+  return false;
 }
 
 export function UrlIngestView() {
@@ -57,7 +72,7 @@ export function UrlIngestView() {
   const [step, setStep] = useState(0);
   const params = useSearchParams();
   const [url, setUrl] = useState(() => params.get("url") ?? "");
-  const [engine, setEngine] = useState<EngineId>("yt-dlp");
+  const [engine, setEngine] = useState<EngineId>(() => engineFor(params.get("url") ?? "") ?? "yt-dlp");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [inspecting, setInspecting] = useState(false);
@@ -67,6 +82,7 @@ export function UrlIngestView() {
   const [auth, setAuth] = useState<AuthValue>(emptyAuth());
   const [playlistId, setPlaylistId] = useState("");
   const [queued, setQueued] = useState<{ code: string; id: string } | null>(null);
+  const [collection, setCollection] = useState<Extract<CollectionResponse, { ok: true }> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -96,6 +112,7 @@ export function UrlIngestView() {
     setAuth(emptyAuth());
     setPlaylistId("");
     setQueued(null);
+    setCollection(null);
   };
 
   const inspect = async (target = url, eng = engine) => {
@@ -103,6 +120,17 @@ export function UrlIngestView() {
     setInspecting(true);
     setResult(null);
     try {
+      if (eng === "match" && isCollectionLink(target)) {
+        const r = await fetch("/api/worker/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: target.trim() }), cache: "no-store" });
+        const data = (await r.json()) as CollectionResponse | { error: string };
+        if ("error" in data) setResult({ ok: false, engine: eng, code: "ENGINE_ERROR", message: data.error });
+        else if (!data.ok) setResult({ ok: false, engine: eng, code: data.code, message: data.message });
+        else {
+          setCollection(data);
+          actions.logEvent("ingest.collection.read", `Read ${data.collection.tracks.length} songs (no download) · ${data.collection.kind} “${data.collection.name}”`, "info", data.collection.url);
+        }
+        return;
+      }
       const r = await fetch("/api/worker/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: target.trim(), engine: eng, toleranceSec: settings.durationToleranceSec }), cache: "no-store" });
       const data = (await r.json()) as InspectResponse | { error: string };
       const res: InspectResponse = "error" in data ? { ok: false, engine: eng, code: "ENGINE_ERROR", message: data.error } : data;
@@ -153,6 +181,8 @@ export function UrlIngestView() {
 
   const canNext = step === 0 ? !!meta && durOk && !!fmt : step === 1 ? identityValid(identity) : step === 2 ? authValid(auth) : true;
   const selectedAuth = auth.mode === "existing" ? auths.find((a) => a.id === auth.authorizationId) : undefined;
+
+  if (collection) return <CollectionIngest data={collection} onBack={reset} />;
 
   if (queued) {
     return (
@@ -280,7 +310,7 @@ export function UrlIngestView() {
                     { INVALID_URL: "Invalid URL", WRONG_ENGINE: "Wrong engine for this link", PLAYLIST: "Not a single track", ACCESS_REQUIRED: "Additional access required", UNSUPPORTED: "Source not available", NETWORK: "Network problem", ENGINE_MISSING: "Engine not installed", ENGINE_ERROR: "The engine reported an error" }[result.code]
                   }
                   action={
-                    result.code === "WRONG_ENGINE" && result.suggest?.length ? (
+                    (result.code === "WRONG_ENGINE" || result.code === "PLAYLIST") && result.suggest?.length ? (
                       <div className="flex gap-2">
                         {result.suggest.filter(installed).map((e) => (
                           <Button

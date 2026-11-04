@@ -60,11 +60,10 @@ export interface AudioFile {
   sha256: string;
   path: string;
   createdAt: number;
-  /** "blob" = real bytes in IndexedDB (imported from disk) · "disk" = file on this PC, read through the local server · "synthetic" = legacy demo */
-  audio: "synthetic" | "blob" | "disk";
+  /** "disk" = file on this PC, read through the local server · "synthetic" = legacy demo */
+  audio: "synthetic" | "disk";
   /** disk files: "managed" = library/originals (downloads) · "external" = in a scan folder, referenced in place and never deleted */
   location?: "managed" | "external";
-  blobKey?: string;
   declaredExt?: string;
 }
 
@@ -173,8 +172,8 @@ export type Scenario =
 export interface IngestJob {
   id: string;
   code: string;
-  /** simulated = legacy demo adapter · local-file = imported from disk · worker = downloaded by the local worker */
-  mode: "simulated" | "local-file" | "worker" | "folder";
+  /** simulated = legacy demo adapter · worker = downloaded by the local worker · folder = read in place from a music folder */
+  mode: "simulated" | "worker" | "folder";
   tool: IngestTool;
   toolVersion: string;
   status: JobStatus;
@@ -205,8 +204,6 @@ export interface IngestJob {
     decidedAt?: number;
   };
   trackId?: string;
-  /** local-file mode */
-  blobKey?: string;
   /** folder mode: absolute path of the file in a registered folder */
   localPath?: string;
   fileName?: string;

@@ -10,11 +10,12 @@ const nextConfig: NextConfig = {
   },
   // Local QA through 127.0.0.1 (the back office runs on the client's own PC).
   allowedDevOrigins: ["127.0.0.1"],
-  // Simulated ingestion paths were removed (URL ingest, text search, match
-  // review, engine benchmark, references, engine settings); old links land on the real import instead.
+  // Removed paths: the simulated ingestion views (text search, match review,
+  // engine benchmark, references, engine settings) and Import from disk. URL
+  // ingest now lives at /ingest, so /ingest/url (query included) lands there.
   redirects() {
     return [
-      { source: "/ingest/:path(import|search|review)", destination: "/ingest", permanent: false },
+      { source: "/ingest/:path(url|import|search|review)", destination: "/ingest", permanent: false },
       { source: "/benchmark/:path*", destination: "/", permanent: false },
       { source: "/library/references", destination: "/library", permanent: false },
       { source: "/settings/engines", destination: "/settings", permanent: false },

@@ -4,13 +4,12 @@
  * Ingestion worker. ONE job at a time (RF-ING-05), states
  * pending → downloading → validating → ready | failed (RF-ING-01).
  * Limits (size / duration) and bounded retries (RF-ING-06/07).
- * Simulated jobs follow the simulation adapter; local-file jobs run the real
- * in-browser validation pipeline over bytes stored in IndexedDB staging.
+ * Simulated jobs follow the simulation adapter; worker jobs (URL downloads)
+ * and folder jobs are probed and decoded with FFmpeg on this PC.
  */
 import { CHECK_ORDER, codecLabel } from "./seed";
 import { ENGINE_INFO, PROVIDER_LABEL, simulateBench } from "./catalog";
-import { decodeFully, EXT_COMPATIBLE, extOf, sha256Hex, sniffAudio } from "./audio-inspect";
-import { idbDel, idbGet, idbPut } from "./idb";
+import { idbDel, idbPut } from "./idb";
 import { COVER_PREFIX } from "./covers";
 import type { ProbeResult, WorkerJobState } from "./worker-types";
 import { libraryCoverUrl, type LocalProbe } from "./library-types";
@@ -20,6 +19,21 @@ import { fakeSha256, fmtDuration, seeded, slug, uid } from "./util";
 import { toast } from "./toast";
 
 const CHECK_MS = 650;
+
+const extOf = (name: string) => (name.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? "").toLowerCase();
+
+/** File extensions that legitimately carry each container family. */
+const EXT_COMPATIBLE: Record<string, string[]> = {
+  mp3: ["mp3"],
+  flac: ["flac"],
+  wav: ["wav", "wave"],
+  ogg: ["ogg", "oga", "opus"],
+  opus: ["opus", "ogg"],
+  m4a: ["m4a", "mp4", "aac", "alac"],
+  webm: ["webm", "weba", "mka"],
+  aac: ["aac"],
+  aiff: ["aif", "aiff"],
+};
 
 function providerFromLabel(label: string) {
   const hit = (Object.keys(PROVIDER_LABEL) as (keyof typeof PROVIDER_LABEL)[]).find((k) => PROVIDER_LABEL[k] === label || k === label);
@@ -66,7 +80,6 @@ function fail(s: State, j: IngestJob, code: FailureCode, message: string, now: n
   }));
   s2 = pushAudit(s2, "ingest.job.failed", `${j.code} failed · ${code} — ${message}`, "error", j.code, { tool: j.tool, version: j.toolVersion, source: j.source.url });
   if (j.mode !== "simulated" && !(retryable ?? isTransient)) {
-    if (j.blobKey) void idbDel(j.blobKey);
     if (j.source.coverSeed.startsWith("img:")) void idbDel(j.source.coverSeed.slice(4));
   }
   queueMicrotask(() => toast({ tone: "error", title: `${j.code} failed`, description: message }));
@@ -120,7 +133,7 @@ function finalizeReady(s0: State, j: IngestJob, file: Omit<AudioFile, "id" | "tr
     finishedAt: now,
     trackId,
     metrics: { ...x.metrics, processMs: now - (x.phaseStartedAt ?? now) + (x.metrics.processMs ?? 0), diskMB: +(file.sizeBytes / 1048576).toFixed(1) },
-    events: [...x.events, { at: now, kind: "ready", message: j.mode === "local-file" ? "Validated · original stored in the library (IndexedDB)" : j.mode === "folder" ? `Validated · added to the library in place (${path})` : `Validated · original stored at ${path}` }],
+    events: [...x.events, { at: now, kind: "ready", message: j.mode === "folder" ? `Validated · added to the library in place (${path})` : `Validated · original stored at ${path}` }],
   }));
   s2 = pushAudit(s2, "ingest.job.ready", `${j.code} ready · ${track.code} “${track.title}” added to library`, "info", j.code, { sha256: file.sha256 });
   if (j.playlistId) {
@@ -293,159 +306,12 @@ function advanceSimulated(s: State, j: IngestJob, now: number): State {
   return s;
 }
 
-/* ------------------------------------------------------------------ */
-/* local-file pipeline (real validation over real bytes)               */
-/* ------------------------------------------------------------------ */
-
 const running = new Set<string>();
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Reads a staged blob chunk by chunk, reporting the real fraction read (throttled). */
-async function readWithProgress(blob: Blob, onProgress: (p: number) => void): Promise<ArrayBuffer> {
-  const out = new Uint8Array(blob.size);
-  const reader = blob.stream().getReader();
-  let read = 0;
-  let last = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    out.set(value, read);
-    read += value.byteLength;
-    const p = blob.size ? read / blob.size : 1;
-    if (p - last >= 0.05 || p === 1) {
-      last = p;
-      onProgress(p);
-    }
-  }
-  return out.buffer;
-}
 
 function stillActive(id: string) {
   const j = getState().jobs.find((x) => x.id === id);
   return !!j && (j.status === "downloading" || j.status === "validating") && !j.paused;
-}
-
-async function runLocal(jobId: string) {
-  if (running.has(jobId)) return;
-  running.add(jobId);
-  try {
-    const job0 = getState().jobs.find((x) => x.id === jobId)!;
-    const t0 = performance.now();
-    const blob = job0.blobKey ? await idbGet(job0.blobKey) : undefined;
-    if (!blob) {
-      setState((s) => fail(s, s.jobs.find((x) => x.id === jobId)!, "INTERRUPTED", "Staged file not found (staging was cleared). Re-import the file.", Date.now(), false));
-      return;
-    }
-    // "downloading" = reading the staged bytes; progress is the real share read so far
-    const buf = await readWithProgress(blob, (p) => setState((s) => updateJob(s, jobId, (x) => ({ ...x, progress: p }))));
-    if (!stillActive(jobId)) return;
-    const limitBytes = job0.limits.maxSizeMB * 1024 * 1024;
-    if (buf.byteLength > limitBytes) {
-      setState((s) => fail(s, s.jobs.find((x) => x.id === jobId)!, "SIZE_LIMIT", `File is ${(buf.byteLength / 1048576).toFixed(1)} MB — exceeds the ${job0.limits.maxSizeMB} MB limit.`, Date.now(), false));
-      return;
-    }
-    const tProc = performance.now();
-    setState((s) =>
-      updateJob(s, jobId, (x) => ({
-        ...x,
-        status: "validating",
-        progress: 1,
-        phaseStartedAt: Date.now(),
-        metrics: { ...x.metrics, downloadMs: Math.round(tProc - t0) },
-        checks: CHECK_ORDER.map((key, i) => ({ key, status: i === 0 ? "running" : "pending" })),
-        events: [...x.events, { at: Date.now(), kind: "validating", message: `Read ${(buf.byteLength / 1048576).toFixed(1)} MB from staging · validating real bytes` }],
-      })),
-    );
-    const step = async (key: ValidationCheck["key"], patch: Partial<ValidationCheck>) => {
-      await wait(0); // yield so each check renders as it resolves
-      setState((s) =>
-        updateJob(s, jobId, (x) => {
-          const i = CHECK_ORDER.indexOf(key);
-          return {
-            ...x,
-            checks: x.checks.map((c, k) => (k === i ? { ...c, ...patch } : k === i + 1 && patch.status !== "fail" ? { ...c, status: "running" } : c)),
-          };
-        }),
-      );
-    };
-    // 1. complete — decode end-to-end
-    let decoded: { durationSec: number; channels: number };
-    try {
-      decoded = await decodeFully(buf);
-    } catch (e) {
-      await step("complete", { status: "fail", detail: `Decoder could not read the stream end-to-end (${(e as Error).message || "decode error"})` });
-      setState((s) => fail(s, s.jobs.find((x) => x.id === jobId)!, "DECODE_ERROR", "File is incomplete or not decodable — not published to the library.", Date.now(), false));
-      return;
-    }
-    if (!stillActive(jobId)) return;
-    await step("complete", { status: "pass", detail: `Decoded end-to-end (${fmtDuration(decoded.durationSec, true)}, ${decoded.channels} ch)` });
-    // 2. real codec
-    const sn = sniffAudio(buf);
-    const ext = extOf(job0.fileName ?? "");
-    const extOk = !!sn && (EXT_COMPATIBLE[sn.ext]?.includes(ext) ?? ext === sn.ext);
-    const codecText = sn
-      ? `${codecLabel(sn.codec)} · ${sn.sampleRateHz ? `${(sn.sampleRateHz / 1000).toFixed(1)} kHz` : "rate n/a"} · ${sn.channels ?? decoded.channels} ch (${sn.container.toUpperCase()})`
-      : "Unrecognized container — decoded by the browser but codec unknown";
-    await step("codec", sn && extOk ? { status: "pass", detail: codecText } : { status: "warn", detail: sn ? `Extension .${ext || "?"} but actual stream is ${codecText} — real codec recorded` : codecText });
-    // 3. duration + limit
-    const maxSec = job0.limits.maxDurationMin * 60;
-    if (decoded.durationSec > maxSec) {
-      await step("duration", { status: "fail", detail: `${fmtDuration(decoded.durationSec)} exceeds the ${job0.limits.maxDurationMin}:00 limit` });
-      setState((s) => fail(s, s.jobs.find((x) => x.id === jobId)!, "DURATION_LIMIT", `Duration ${fmtDuration(decoded.durationSec)} exceeds the ${job0.limits.maxDurationMin} min limit.`, Date.now(), false));
-      return;
-    }
-    await step("duration", { status: "pass", detail: `${fmtDuration(decoded.durationSec, true)} (limit ${job0.limits.maxDurationMin}:00)` });
-    // 4. hash
-    const sha = await sha256Hex(buf);
-    await step("hash", { status: "pass", detail: sha });
-    // 5. duplicate
-    const st = getState();
-    const dup = st.files.find((f) => f.sha256 === sha);
-    if (dup) {
-      const t = st.tracks.find((x) => x.id === dup.trackId);
-      await step("duplicate", { status: "fail", detail: `Same hash as ${t?.code ?? "existing file"} · ${t?.title ?? ""}` });
-      setState((s) => {
-        const s1: State = {
-          ...s,
-          duplicates: [{ id: `dup_${jobId}`, at: Date.now(), jobId, existingTrackId: dup.trackId, sha256: sha, sourceUrl: job0.source.url, title: job0.identity.title, dismissed: false }, ...s.duplicates],
-        };
-        return fail(s1, s1.jobs.find((x) => x.id === jobId)!, "DUPLICATE", `Identical SHA-256 to “${t?.title ?? "existing track"}” already in library — no second copy added.`, Date.now(), false);
-      });
-      return;
-    }
-    await step("duplicate", { status: "pass", detail: `No identical hash among ${st.files.length} library files` });
-    if (!stillActive(jobId)) return;
-    const procMs = Math.round(performance.now() - tProc);
-    setState((s) => {
-      const j = s.jobs.find((x) => x.id === jobId)!;
-      const withMetrics = updateJob(s, jobId, (x) => ({ ...x, metrics: { ...x.metrics, processMs: procMs } }));
-      return finalizeReady(
-        withMetrics,
-        { ...j, phaseStartedAt: Date.now() },
-        {
-          codec: sn?.codec ?? "unknown",
-          container: sn?.container ?? (ext || "unknown"),
-          bitrateKbps: Math.round((buf.byteLength * 8) / decoded.durationSec / 1000),
-          sampleRateHz: sn?.sampleRateHz ?? null,
-          channels: sn?.channels ?? decoded.channels,
-          sizeBytes: buf.byteLength,
-          durationSec: decoded.durationSec,
-          sha256: sha,
-          audio: "blob",
-          blobKey: job0.blobKey,
-          declaredExt: ext || sn?.ext,
-        },
-        Date.now(),
-      );
-    });
-  } catch (e) {
-    setState((s) => {
-      const j = s.jobs.find((x) => x.id === jobId);
-      return j ? fail(s, j, "DECODE_ERROR", (e as Error).message || "Unexpected validation error", Date.now(), false) : s;
-    });
-  } finally {
-    running.delete(jobId);
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -456,6 +322,8 @@ async function runLocal(jobId: string) {
 export const workerKey = (j: Pick<IngestJob, "id" | "retries">) => `${j.id}-a${j.retries}`;
 
 const WORKER_FAIL: Record<string, { code: FailureCode; retryable: boolean }> = {
+  // YouTube's bot check: a temporary block on this connection (the queue pauses itself, see runWorker).
+  RATE_LIMITED: { code: "NETWORK", retryable: true },
   ACCESS_REQUIRED: { code: "ACCESS_REQUIRED", retryable: false },
   NETWORK: { code: "NETWORK", retryable: true },
   SIZE_LIMIT: { code: "SIZE_LIMIT", retryable: false },
@@ -488,7 +356,7 @@ async function runWorker(jobId: string) {
   const release = () => void workerFetch(`/jobs/${key}`, { method: "DELETE" }).catch(() => undefined);
   try {
     const engineFormat = job0.formatId === "spotdl" || job0.formatId === "freyr" ? undefined : job0.formatId;
-    const created = await workerFetch("/jobs", { method: "POST", body: JSON.stringify({ key, engine: job0.tool, url: job0.source.url, formatId: engineFormat, maxSizeMB: job0.limits.maxSizeMB }) });
+    const created = await workerFetch("/jobs", { method: "POST", body: JSON.stringify({ key, engine: job0.tool, url: job0.source.url, formatId: engineFormat, maxSizeMB: job0.limits.maxSizeMB, toleranceSec: job0.limits.toleranceSec }) });
     if (!created.ok) {
       const err = ((await created.json().catch(() => ({}))) as { error?: string }).error ?? `Worker answered HTTP ${created.status}`;
       return failFromWorker(jobId, "ENGINE_ERROR", err, false);
@@ -505,6 +373,14 @@ async function runWorker(jobId: string) {
         updateJob(s, jobId, (x) => {
           let next = x;
           if (cur.progress != null && x.status === "downloading") next = { ...next, progress: cur.progress };
+          // Playlist songs pick their upload when they run: record it in the provenance.
+          if (cur.matched && x.source.sourceId !== cur.matched.id) {
+            next = {
+              ...next,
+              source: { ...next.source, sourceId: cur.matched.id, channel: cur.matched.channel },
+              events: [...next.events, { at: Date.now(), kind: "note", message: `Match picked “${cur.matched.title}” (${cur.matched.channel}) · youtu.be/${cur.matched.id}${!cur.matched.quality ? " · audio quality not measured" : cur.matched.quality.full ? " · full-range audio" : ` · treble cut at ≈${cur.matched.quality.cutoffKHz} kHz — the best copy found is compressed`}` }],
+            };
+          }
           const line = cur.log.at(-1);
           if (line && line !== lastLog && !line.startsWith("[bf]") && /error|warn|match|found|skipp|retry/i.test(line)) {
             lastLog = line;
@@ -535,6 +411,11 @@ async function runWorker(jobId: string) {
     if (st.status === "failed" || !st.file) {
       const f = WORKER_FAIL[st.failure?.code ?? "ENGINE_ERROR"] ?? WORKER_FAIL.ENGINE_ERROR;
       release();
+      if (st.failure?.code === "RATE_LIMITED" && !getState().queuePaused) {
+        // Every further YouTube request would hit the same block: hold the queue until the operator resumes it.
+        actions.setQueuePaused(true);
+        queueMicrotask(() => toast({ tone: "warning", title: "Queue paused — YouTube bot check", description: "YouTube asked this PC to confirm it is not a bot. Wait a while, then resume the queue; the song will be retried." }));
+      }
       return failFromWorker(jobId, f.code, st.failure?.message ?? "Worker failed", st.failure?.retryable ?? f.retryable, st.log);
     }
 
@@ -779,8 +660,7 @@ export function engineTick() {
   if (active) {
     if (active.mode === "simulated") setState((x) => advanceSimulated(x, x.jobs.find((y) => y.id === active.id)!, now));
     else if (active.mode === "worker") void runWorker(active.id);
-    else if (active.mode === "folder") void runFolder(active.id);
-    else void runLocal(active.id);
+    else void runFolder(active.id);
   } else if (!st.queuePaused) {
     {
       const next = st.jobs.filter((j) => j.status === "pending" && !j.paused).sort((a, b) => a.createdAt - b.createdAt)[0];
@@ -793,7 +673,7 @@ export function engineTick() {
               status: "downloading",
               startedAt: j.startedAt ?? now,
               phaseStartedAt: now - (j.progress > 0 && j.progress < 1 ? j.progress * dur : 0),
-              events: [...j.events, { at: now, kind: "downloading", message: j.mode === "local-file" ? "Reading staged file from IndexedDB (1 concurrent job)" : j.mode === "folder" ? `Reading ${j.localPath} in place (1 concurrent job)` : j.mode === "worker" ? `Sent to the local worker · ${j.tool} ${j.toolVersion} downloads into an isolated staging folder (1 concurrent job)` : `Downloading into ${x.settings.stagingDir}/${j.id} (isolated · 1 concurrent job)` }],
+              events: [...j.events, { at: now, kind: "downloading", message: j.mode === "folder" ? `Reading ${j.localPath} in place (1 concurrent job)` : j.mode === "worker" ? `Sent to the local worker · ${j.tool} ${j.toolVersion} downloads into an isolated staging folder (1 concurrent job)` : `Downloading into ${x.settings.stagingDir}/${j.id} (isolated · 1 concurrent job)` }],
             })),
             "ingest.job.started",
             `${next.code} started · ${next.tool} ${next.toolVersion}`,

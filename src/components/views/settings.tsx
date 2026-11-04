@@ -61,7 +61,7 @@ export function IngestionSettings() {
   return (
     <Body className="max-w-4xl">
       <Card title="Limits" description="Enforced per file. A job that goes over a limit ends as failed with the reason.">
-        <Row title="Maximum file size" desc="Larger files are rejected before import and fail validation if queued; the staged copy is removed.">
+        <Row title="Maximum file size" desc="Downloads are aborted when they reach this size and the partial file is removed from staging.">
           <Input type="number" min={1} max={2000} value={d.value.maxSizeMB} onChange={(e) => d.set({ maxSizeMB: Math.max(1, Number(e.target.value)) })} suffix="MB" className="w-36" aria-label="Maximum file size in MB" />
         </Row>
         <Row title="Maximum duration" desc="Measured after a full decode; longer files fail validation and are not added to the library.">
@@ -78,8 +78,8 @@ export function IngestionSettings() {
         <Row title="Concurrency" desc="The pilot processes one task at a time." locked="Pilot constraint (RF-ING-05)">
           <Pill>1 job</Pill>
         </Row>
-        <Row title="Staging" desc="Each file is staged in this browser's storage (IndexedDB) under its job. Only complete, validated files reach the library." locked="Local browser storage">
-          <Pill>IndexedDB · this device</Pill>
+        <Row title="Staging" desc="Each download goes to its own folder in .worker/staging on this PC and is removed after validation. Only complete, validated files reach the library." locked="Local worker">
+          <Pill>Disk · this PC</Pill>
         </Row>
         <Row title="Authorization before download" desc="An import can't be queued without an authorization basis." locked="Compliance requirement (RF-ING-02)">
           <Switch checked onChange={() => undefined} disabled label="Require authorization" />
@@ -103,11 +103,11 @@ export function ValidationSettings() {
   return (
     <Body className="max-w-4xl">
       <Card title="Validation" description="Runs on every import, in this order. Any failure stops the job and nothing reaches the library.">
-        <Row title="Complete file" desc="The stream must decode end to end — FFmpeg for URL downloads, the browser's decoder for files from disk; truncated or corrupt files fail." locked="RF-04">
+        <Row title="Complete file" desc="The stream must decode end to end with FFmpeg; truncated or corrupt files fail." locked="RF-04">
           <Pill>Full decode</Pill>
         </Row>
-        <Row title="Real codec detection" desc="Read from the stream, never from the extension: ffprobe for URL downloads, the header parser for files from disk. A mismatching extension is a warning and the real codec is recorded." locked="RF-PRO-01">
-          <Pill>ffprobe · header</Pill>
+        <Row title="Real codec detection" desc="Read from the stream with ffprobe, never from the extension. A mismatching extension is a warning and the real codec is recorded." locked="RF-PRO-01">
+          <Pill>ffprobe</Pill>
         </Row>
         <Row title="Duration" desc="Measured from the decoded audio and checked against the maximum in Settings › Ingestion." locked="RF-ING-06">
           <Pill>Decoded length</Pill>
@@ -125,7 +125,7 @@ export function ValidationSettings() {
             <span className="w-12 text-right font-mono text-[13px]">±{d.value.durationToleranceSec}s</span>
           </div>
         </Row>
-        <Row title="Hash algorithm" desc="Computed over the original bytes with Web Crypto." locked="RF-04">
+        <Row title="Hash algorithm" desc="Computed over the original bytes on this PC." locked="RF-04">
           <Pill>SHA-256</Pill>
         </Row>
         <Row title="Duplicates" desc="A file with the same SHA-256 as one already in the library fails and is logged under Library › Duplicates." locked="RF-BIB-04">
@@ -133,7 +133,7 @@ export function ValidationSettings() {
         </Row>
       </Card>
       <Card title="Processing policy" className="mt-5" description="Fidelity and loudness are different properties. Re-encoding never improves quality.">
-        <Row title="Conversion" desc="The original is stored exactly as received. Only files this browser can decode are accepted, so no compatible copy is needed." locked="RF-PRO-03">
+        <Row title="Conversion" desc="The original is stored exactly as received. Output written by spotDL or FreyrJS is recorded as written by the engine, never as source quality." locked="RF-PRO-03">
           <Pill>No conversion</Pill>
         </Row>
         <Row title="Keep originals" desc="Originals are never modified or deleted automatically; deleting a track always needs confirmation." locked="RF-BIB-02 / RF-BIB-06">
@@ -149,9 +149,6 @@ export function ValidationSettings() {
         </Row>
         <Row title="Music folders" desc="Folders you add in Library › Folders are read in place: files are never copied, moved or deleted; deleting a track only removes it from the library." locked="Library › Folders">
           <Pill>Read in place</Pill>
-        </Row>
-        <Row title="Files imported from disk" desc="Files uploaded in Ingest › Import from disk keep their bytes in this browser's IndexedDB. Usage is in Settings › Workspace." locked="Local browser storage">
-          <Pill>IndexedDB · this browser</Pill>
         </Row>
       </Card>
       <SaveBar
@@ -170,7 +167,6 @@ export function ValidationSettings() {
 export function WorkspaceSettings() {
   const d = useDraft((s) => ({ operator: s.operator }));
   const offline = useIsOffline();
-  const files = useStore((s) => s.files);
   const [est, setEst] = useState<{ usage?: number; quota?: number; persisted?: boolean } | null>(null);
   const [sw, setSw] = useState<"unsupported" | "inactive" | "active">("inactive");
   const [reset, setReset] = useState(false);
@@ -189,8 +185,6 @@ export function WorkspaceSettings() {
       alive = false;
     };
   }, []);
-
-  const realFiles = files.filter((f) => f.audio === "blob");
 
   return (
     <Body className="max-w-4xl">
@@ -215,7 +209,7 @@ export function WorkspaceSettings() {
             {sw === "active" ? "Active" : sw === "unsupported" ? "Unsupported" : "Not active (dev)"}
           </Pill>
         </Row>
-        <Row title="Browser storage" desc={`${realFiles.length} imported file(s) stored as real bytes on this device.`}>
+        <Row title="Browser storage" desc="Workspace records and cover art are kept in this browser; the audio itself lives on disk.">
           <div className="text-right">
             <div className="font-mono text-[13px]">
               {fmtBytes(est?.usage)} <span className="text-fg-3">/ {fmtBytes(est?.quota)}</span>

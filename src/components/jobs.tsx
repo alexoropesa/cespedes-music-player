@@ -194,7 +194,6 @@ function JobDrawerInner({
 }) {
   const { items, confirm } = useJobActions(job);
   const router = useRouter();
-  const measuredSec = useStore((s) => s.files.find((f) => f.kind === "original" && f.trackId === job.trackId)?.durationSec);
   const artist = artists.find((a) => a.id === job.identity.artistId);
   const auth = auths.find((a) => a.id === job.authorizationId);
   const fmt = job.source.formats.find((f) => f.id === job.formatId);
@@ -226,7 +225,7 @@ function JobDrawerInner({
             {job.status === "downloading" && (
               <div className="mt-4">
                 <div className="mb-1.5 flex justify-between text-[12px] text-fg-2">
-                  <span>{job.paused ? "Paused" : job.mode === "local-file" ? "Copying into staging" : "Downloading into staging"}</span>
+                  <span>{job.paused ? "Paused" : job.mode === "folder" ? "Reading from the folder" : "Downloading into staging"}</span>
                   <span className="font-mono tabular-nums">
                     {fmtBytes((fmt?.sizeBytes ?? 0) * job.progress)} / {fmtBytes(fmt?.sizeBytes)} · {Math.round(job.progress * 100)}%
                   </span>
@@ -288,7 +287,7 @@ function JobDrawerInner({
                     { k: "Platform", v: job.source.platform },
                     { k: "Source title", v: job.source.title },
                     { k: "Channel / uploader", v: <span>{job.source.channel} <span className="text-fg-3">· not a confirmed artist</span></span> },
-                    { k: job.mode === "local-file" ? "Measured duration" : "Source duration", v: job.mode === "local-file" ? (measuredSec != null ? fmtDuration(measuredSec, true) : "—") : fmtDuration(job.source.durationSec) },
+                    { k: "Source duration", v: fmtDuration(job.source.durationSec) },
                     { k: "Format", v: fmt ? <span className="inline-flex items-center gap-2"><CodecBadge codec={fmt.codec} kbps={fmt.abrKbps} /> {fmt.container.toUpperCase()} · {(fmt.asrHz / 1000).toFixed(1)} kHz · ≈ {fmtBytes(fmt.sizeBytes)}</span> : "—" },
                   ]}
                 />
@@ -320,7 +319,7 @@ function JobDrawerInner({
                 <h4 className="mb-2 text-[12px] font-semibold text-fg-3">Sandbox & limits (snapshot at creation)</h4>
                 <KV
                   items={[
-                    { k: "Staging", v: job.mode === "worker" ? `.worker/staging/${job.id}-a${job.retries}` : job.mode === "folder" ? "None · read in place from the folder" : `IndexedDB · ${job.blobKey ?? job.id}`, mono: true },
+                    { k: "Staging", v: job.mode === "worker" ? `.worker/staging/${job.id}-a${job.retries}` : job.mode === "folder" ? "None · read in place from the folder" : `${job.id} (demo)`, mono: true },
                     { k: "Concurrency", v: "1 job at a time" },
                     { k: "Max size", v: `${job.limits.maxSizeMB} MB` },
                     { k: "Max duration", v: `${job.limits.maxDurationMin} min` },

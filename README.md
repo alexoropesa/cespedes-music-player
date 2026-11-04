@@ -22,7 +22,7 @@ npm run build && npm run start
 | Sección | Contenido |
 |---|---|
 | Overview | KPIs, tarea activa, motores, alertas de derechos, actividad |
-| Ingest | From URL (asistente en 4 pasos) · Text search (yt-dlp / spotDL / FreyrJS) · Match review · Import from disk (validación real) |
+| Ingest | From URL (asistente en 4 pasos; yt-dlp / spotDL / FreyrJS / Match) — los archivos propios entran por Library › Folders |
 | Queue monitor | Jobs (estados, pausa, cancelar, reintento acotado, detalle) · Worker & sandbox (métricas, fallos por herramienta) |
 | Library | Tracks · Artists · References · Duplicates |
 | Playlists | Rejilla y detalle (reordenar, añadir y editar) |

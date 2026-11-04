@@ -3,7 +3,7 @@
 /**
  * Client store (useSyncExternalStore) + persisted state + domain actions.
  * Every mutating action writes an audit event (actor + IP) — RNF Auditability.
- * Persistence: localStorage (state) + IndexedDB (audio bytes). On reload, jobs
+ * Persistence: localStorage (state) + IndexedDB (cover art). On reload, jobs
  * left in downloading/validating are recovered to pending (RNF-FIA-01).
  */
 import { useSyncExternalStore } from "react";
@@ -105,10 +105,48 @@ export function initStore() {
   // An older workspace format (e.g. the former demo seed) is discarded with its
   // stored audio, so records and bytes never drift apart.
   if (stale) void idbClear();
-  state = loaded ? recoverAfterRestart(loaded, now) : createWorkspace(now);
+  state = loaded ? recoverAfterRestart(dropDiskImports(loaded), now) : createWorkspace(now);
   hydrated = true;
   emit();
   schedulePersist();
+}
+
+/**
+ * "Import from disk" was removed: its tracks kept their audio as bytes in this
+ * browser (IndexedDB), which nothing can play or validate any more. A
+ * workspace saved before the removal drops those tracks, their bytes and
+ * covers, and their jobs, once, with an audit entry. Music folders and URL
+ * downloads are untouched.
+ */
+function dropDiskImports(s: State): State {
+  type Legacy = { audio: string; blobKey?: string };
+  const gone = s.files.filter((f) => (f as unknown as Legacy).audio === "blob");
+  const legacyJobs = s.jobs.filter((j) => (j.mode as string) === "local-file");
+  if (!gone.length && !legacyJobs.length) return s;
+  const trackIds = new Set(gone.map((f) => f.trackId));
+  for (const f of gone) {
+    const key = (f as unknown as Legacy).blobKey;
+    if (key) void idbDel(key);
+  }
+  for (const t of s.tracks) if (trackIds.has(t.id) && t.coverSeed.startsWith("img:")) void idbDel(t.coverSeed.slice(4));
+  for (const j of legacyJobs) {
+    const key = (j as unknown as Legacy).blobKey;
+    if (key) void idbDel(key);
+  }
+  const jobIds = new Set(legacyJobs.map((j) => j.id));
+  return pushAudit(
+    {
+      ...s,
+      tracks: s.tracks.filter((t) => !trackIds.has(t.id)),
+      files: s.files.filter((f) => !trackIds.has(f.trackId)),
+      jobs: s.jobs.filter((j) => !jobIds.has(j.id)),
+      playlists: s.playlists.map((p) => (p.trackIds.some((id) => trackIds.has(id)) ? { ...p, trackIds: p.trackIds.filter((id) => !trackIds.has(id)) } : p)),
+      duplicates: s.duplicates.filter((d) => !trackIds.has(d.existingTrackId) && !jobIds.has(d.jobId)),
+    },
+    "system.migration",
+    `Import from disk was removed: dropped ${trackIds.size} track(s) stored in this browser and ${legacyJobs.length} import job(s)`,
+    "warning",
+  );
 }
 
 function recoverAfterRestart(s: State, now: number): State {
@@ -195,6 +233,11 @@ export function canRetry(j: IngestJob) {
   return j.status === "failed" && !!j.failure?.retryable && j.retries < j.maxRetries;
 }
 
+/** Pending, downloading or validating (including a job waiting for match review). */
+export function isCancellable(j: IngestJob) {
+  return j.status !== "ready" && j.status !== "failed";
+}
+
 /* ------------------------------------------------------------------ */
 /* actions                                                             */
 /* ------------------------------------------------------------------ */
@@ -210,7 +253,6 @@ export interface NewJobInput {
   playlistId?: string;
   scenario: IngestJob["scenario"];
   review?: IngestJob["review"];
-  blobKey?: string;
   fileName?: string;
   localPath?: string;
 }
@@ -246,7 +288,6 @@ export const actions = {
         metrics: {},
         events: [{ at: now, kind: "pending", message: `Job accepted · ${auth?.code ?? "authorization"} recorded before download` }],
         review: input.review,
-        blobKey: input.blobKey,
         localPath: input.localPath,
         fileName: input.fileName,
       };
@@ -284,21 +325,45 @@ export const actions = {
   },
 
   cancelJob(id: string) {
+    actions.cancelJobs([id]);
+  },
+
+  /**
+   * Cancels every given job that is still pending or running (ready and failed
+   * ones are left alone), in one state update and one audit entry. A running
+   * worker job notices on its next poll and its staging folder is cleaned.
+   * Returns how many were cancelled.
+   */
+  cancelJobs(ids: string[]): number {
+    let cancelled = 0;
     setState((s) => {
-      const j = s.jobs.find((x) => x.id === id);
-      if (!j || j.status === "ready" || j.status === "failed") return s;
+      const targets = s.jobs.filter((j) => ids.includes(j.id) && isCancellable(j));
+      cancelled = targets.length;
+      if (!targets.length) return s;
       const now = Date.now();
-      let s2 = updateJob(s, id, (x) => ({
-        ...x,
-        status: "failed",
-        paused: false,
-        finishedAt: now,
-        failure: { code: "CANCELLED", message: "Cancelled by operator — staging folder cleaned.", tool: x.tool, version: x.toolVersion, retryable: true, at: now },
-        events: [...x.events, { at: now, kind: "failed", message: "Cancelled by operator" }],
-      }));
-      s2 = { ...s2, reviews: s2.reviews.map((r) => (r.jobId === id && r.status === "needs-review" ? { ...r, status: "rejected", decidedAt: now, decidedBy: s.settings.operator.email } : r)) };
-      return pushAudit(s2, "ingest.job.cancelled", `Cancelled ${j.code}`, "warning", j.code);
+      const set = new Set(targets.map((j) => j.id));
+      const s2: State = {
+        ...s,
+        jobs: s.jobs.map((x) =>
+          set.has(x.id)
+            ? {
+                ...x,
+                status: "failed",
+                paused: false,
+                finishedAt: now,
+                autoRetryAt: undefined,
+                failure: { code: "CANCELLED", message: "Cancelled by operator — staging folder cleaned.", tool: x.tool, version: x.toolVersion, retryable: true, at: now },
+                events: [...x.events, { at: now, kind: "failed", message: "Cancelled by operator" }],
+              }
+            : x,
+        ),
+        reviews: s.reviews.map((r) => (!!r.jobId && set.has(r.jobId) && r.status === "needs-review" ? { ...r, status: "rejected", decidedAt: now, decidedBy: s.settings.operator.email } : r)),
+      };
+      return targets.length === 1
+        ? pushAudit(s2, "ingest.job.cancelled", `Cancelled ${targets[0].code}`, "warning", targets[0].code)
+        : pushAudit(s2, "ingest.job.cancelled", `Cancelled ${targets.length} jobs (${targets[0].code} … ${targets.at(-1)!.code})`, "warning", undefined, { jobs: targets.map((j) => j.code).join(", ") });
     });
+    return cancelled;
   },
 
   retryJob(id: string, auto = false) {
@@ -375,7 +440,6 @@ export const actions = {
     if (!t) return;
     const files = state.files.filter((f) => f.trackId === id);
     for (const f of files) {
-      if (f.blobKey) void idbDel(f.blobKey);
       // Downloads live in library/originals and go with the track; files in your own folders are never deleted.
       if (f.audio === "disk" && f.location === "managed") void fetch(`/api/library/file?p=${encodeURIComponent(f.path)}`, { method: "DELETE" }).catch(() => undefined);
     }

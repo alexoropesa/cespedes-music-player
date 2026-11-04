@@ -2,12 +2,11 @@
 
 /**
  * Local HTML5 player (RF-07 / RF-REP-01..04). Audio comes only from the local
- * library: real bytes from IndexedDB, or the synthesized demo preview. No
- * network is involved, so playback works offline. Missing/undecodable files
+ * library: files on this PC streamed by the local server, or the synthesized
+ * demo preview. No internet is involved, so playback works offline. Missing/undecodable files
  * are skipped and logged (RF-REP-04).
  */
 import { useSyncExternalStore } from "react";
-import { idbGet } from "./idb";
 import { synthWav } from "./synth";
 import { actions, getState, trackUsable } from "./store";
 import { toast } from "./toast";
@@ -23,7 +22,7 @@ export interface PlayerState {
   repeat: "off" | "all" | "one";
   shuffle: boolean;
   context?: { kind: "playlist" | "library" | "single"; id?: string; label: string };
-  sourceKind?: "blob" | "synthetic" | "disk";
+  sourceKind?: "synthetic" | "disk";
 }
 
 const initial: PlayerState = { queue: [], index: -1, playing: false, loading: false, volume: 0.8, muted: false, repeat: "off", shuffle: false };
@@ -69,7 +68,7 @@ function emitTime() {
   tls.forEach((l) => l());
 }
 
-async function urlFor(trackId: string): Promise<{ url: string; kind: "blob" | "synthetic" | "disk" } | null> {
+async function urlFor(trackId: string): Promise<{ url: string; kind: "synthetic" | "disk" } | null> {
   const s = getState();
   const t = s.tracks.find((x) => x.id === trackId);
   if (!t) return null;
@@ -79,13 +78,8 @@ async function urlFor(trackId: string): Promise<{ url: string; kind: "blob" | "s
   if (f.audio === "disk") return { url: libraryFileUrl(f.path), kind: "disk" };
   const key = f.id;
   if (urlCache.has(key)) return { url: urlCache.get(key)!, kind: f.audio };
-  let blob: Blob | undefined;
-  if (f.audio === "blob" && f.blobKey) blob = await idbGet(f.blobKey).catch(() => undefined);
-  else if (f.audio === "synthetic") {
-    await new Promise((r) => setTimeout(r, 30));
-    blob = synthWav(t.coverSeed + t.id, f.durationSec);
-  }
-  if (!blob) return null;
+  await new Promise((r) => setTimeout(r, 30));
+  const blob = synthWav(t.coverSeed + t.id, f.durationSec);
   const url = URL.createObjectURL(blob);
   urlCache.set(key, url);
   if (urlCache.size > 4) {
